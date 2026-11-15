@@ -309,13 +309,13 @@ function setupShot() {
     const spots = [[0.5, -1], [0, 2]];
     bastion.slice(0, 2).forEach((b, i) => {
       b.pos.set(spots[i][0], 0, spots[i][1]);
-      b.yaw = Math.atan2(-(player.pos.x - b.pos.x), -(player.pos.z - b.pos.z)) + Math.PI;
+      b.yaw = Math.atan2(-(player.pos.x - b.pos.x), -(player.pos.z - b.pos.z)); // v3.11: no +PI (was facing bots backwards)
       b.goal = null;
       b.hp = 100; b.alive = true; b.mesh.visible = true;
     });
     if (solara[0]) {
       solara[0].pos.set(-2.5, 0, -3.5);
-      solara[0].yaw = Math.atan2(-(player.pos.x - solara[0].pos.x), -(player.pos.z - solara[0].pos.z)) + Math.PI;
+      solara[0].yaw = Math.atan2(-(player.pos.x - solara[0].pos.x), -(player.pos.z - solara[0].pos.z)); // v3.11: no +PI
       solara[0].goal = null;
       solara[0].hp = 100; solara[0].alive = true; solara[0].mesh.visible = true;
     }

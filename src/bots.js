@@ -47,72 +47,218 @@ function siteNameFor(pos, map) {
   return 'mid';
 }
 
-export function buildBotMesh(team) {
-  const color = TEAM_COLORS[team];
+// v3.11 MUSCULAR ROBLOX SOLDIERS (user design, approved 16 Nov 2026).
+// Reference: media-generation-frostline-muscular-roblox-sold-*.webp —
+// two blocky, very muscular soldiers: VERY wide shoulders, huge arms,
+// broad chest, sturdy legs, black boots. Solara TERORIS: red vest, red
+// cap + badge, goggles, red mask, green cargo pants, bare muscular arms.
+// Bastion POLISI: blue police vest + POLICE badge, black helmet, blue
+// visor, blue pants. Both hold the SCAR-L diagonally across the chest,
+// stock at the right shoulder, muzzle forward-left — the rifle sits
+// FORWARD of the torso (clear gap, no clipping through the body).
+// Hitbox anchors UNCHANGED: head 0.30 box at y 1.66 (sim.js headshot
+// sphere y+1.66 r 0.22), total height ~1.85, so collision/AI untouched.
+// Facing: local -Z is front (eyes, pouches, buckle, muzzle all -Z).
+// v3.11 BUGFIX (facing): bots faced EXACTLY backwards (facing-check
+// 16 Nov: cosAngle -1.0 vs the engaged enemy) because the yaw formula
+// added a spurious +Math.PI. Removed from all three assignments —
+// that backwards rifle is what the user saw as "senjata tertukar".
+
+// Shared materials, one set per team — 9 bots share them instead of
+// allocating ~6 materials per bot.
+const _teamMats = {};
+function teamMats(team) {
+  if (_teamMats[team]) return _teamMats[team];
+  const std = (color, roughness = 0.85, metalness = 0.05) =>
+    new THREE.MeshStandardMaterial({ color, roughness, metalness });
+  const gun = std(0x3a4048, 0.45, 0.8);
+  const gunLight = std(0x8d99a6, 0.35, 0.8);
+  const skin = std(0x9c7d5f, 0.8, 0);
+  const black = std(0x1c1e22, 0.9, 0);
+  const pale = std(0xd8d2c4, 0.8, 0);
+  const gold = std(0xd8a93c, 0.4, 0.7);
+  const m = team === 'solara' ? {
+    skin, black, pale, gun, gunLight, gold,
+    suit: std(0x556b2f),          // green cargo pants
+    suitDark: std(0x3d4d20),      // knee pads / straps / cargo pockets
+    vest: std(0xcf3a26, 0.75, 0.1),  // red tac vest
+    vestDark: std(0x8f2a1c, 0.7, 0.15),
+    team: std(TEAM_COLORS.solara, 0.6, 0.2), // vivid red accents
+    mask: std(0xb02718, 0.85, 0),   // red face mask (reference Teroris)
+    tan: std(0xc9b48a, 0.9, 0),   // keffiyeh wrap
+    tanDark: std(0xa8905e, 0.9, 0),
+    beret: std(0xc22e24, 0.85, 0),
+  } : {
+    skin, black, pale, gun, gunLight, gold,
+    suit: std(0x2f5fb8),          // police blue uniform
+    suitDark: std(0x24457e),      // darker blue panels
+    vest: std(0x232a33, 0.7, 0.2),// dark tac vest
+    vestDark: std(0x161c22, 0.7, 0.2),
+    team: std(TEAM_COLORS.bastion, 0.6, 0.2), // royal blue accents
+    visor: std(0x7ec8f0, 0.25, 0.4), // light-blue visor
+  };
+  _teamMats[team] = m;
+  return m;
+}
+
+function _box(w, h, d, mat, x, y, z, rx = 0, rz = 0) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  m.position.set(x, y, z);
+  if (rx) m.rotation.x = rx;
+  if (rz) m.rotation.z = rz;
+  m.castShadow = true;
+  return m;
+}
+
+// Headgear by bot name — the reference look per side.
+// Solara (all wear the red mask from the reference): Ash = red cap +
+// badge + goggles, Birch = keffiyeh + goggles, Cinder = balaclava +
+// red cap, Ember = red beret + goggles. Bastion: Frost / Glacier /
+// Storm = black helmet + blue visor, Hail = police cap + badge,
+// Sleet = police cap + sunglasses. The head mesh is the 0.30 skin box
+// at y 1.66; balaclava variants just swap its material to black.
+function _headgear(g, team, name, M) {
+  const head = g.userData.head;
+  const eyes = () => {
+    g.add(_box(0.05, 0.06, 0.02, M.black, -0.065, 1.69, -0.16));
+    g.add(_box(0.05, 0.06, 0.02, M.black, 0.065, 1.69, -0.16));
+  };
+  const glasses = () => g.add(_box(0.26, 0.06, 0.03, M.black, 0, 1.70, -0.16));
+  const redMask = () => g.add(_box(0.24, 0.13, 0.04, M.mask, 0, 1.58, -0.16));
+  const slit = () => g.add(_box(0.24, 0.045, 0.02, M.pale, 0, 1.69, -0.16));
+  const redCap = () => {
+    g.add(_box(0.32, 0.09, 0.32, M.beret, 0, 1.80, 0));
+    g.add(_box(0.28, 0.03, 0.10, M.beret, 0, 1.77, -0.19)); // brim
+    g.add(_box(0.06, 0.06, 0.02, M.gold, 0, 1.80, -0.17)); // cap badge
+  };
+  const helmet = () => {
+    const h = new THREE.Mesh(new THREE.SphereGeometry(0.19, 10, 8, 0, Math.PI * 2, 0, Math.PI / 2), M.black);
+    h.position.y = 1.72;
+    h.castShadow = true;
+    g.add(h);
+    g.add(_box(0.26, 0.08, 0.04, M.visor, 0, 1.70, -0.16)); // blue visor
+  };
+  const policeCap = (withGlasses) => {
+    g.add(_box(0.32, 0.09, 0.32, M.suitDark, 0, 1.80, 0));
+    g.add(_box(0.28, 0.03, 0.10, M.suitDark, 0, 1.77, -0.19)); // brim
+    g.add(_box(0.05, 0.05, 0.02, M.gold, 0, 1.80, -0.17)); // badge
+    if (withGlasses) glasses();
+    else eyes();
+  };
+  if (team === 'solara') {
+    if (name === 'Ash') { redCap(); glasses(); redMask(); }
+    else if (name === 'Birch') {
+      head.material = M.tan;
+      g.add(_box(0.32, 0.12, 0.32, M.tanDark, 0, 1.75, 0));
+      g.add(_box(0.24, 0.14, 0.02, M.skin, 0, 1.60, -0.16)); // face
+      glasses(); redMask();
+    } else if (name === 'Cinder') {
+      head.material = M.black;
+      redCap(); slit();
+    } else { // Ember: red beret + goggles + red mask
+      g.add(_box(0.34, 0.07, 0.34, M.beret, 0, 1.82, 0, 0, 0.08));
+      glasses(); redMask();
+    }
+  } else {
+    if (name === 'Hail') policeCap(false);
+    else if (name === 'Sleet') policeCap(true);
+    else { // Frost / Glacier / Storm: helmet + blue visor + balaclava
+      head.material = M.black;
+      helmet();
+      slit();
+    }
+  }
+}
+
+export function buildBotMesh(team, name) {
+  const M = teamMats(team);
   const g = new THREE.Group();
-  // v3.10 TERANG SEIMBANG (user pick, middle panel): Solara wears warm
-  // olive-camo, Bastion a vivid police-blue uniform — both readable
-  // against bright snow instead of dark silhouettes. Was 0x6b5a44 /
-  // 0x4a5568. Vests take the vivid TEAM_COLORS (red / royal blue).
-  const suit = new THREE.MeshStandardMaterial({ color: team === 'solara' ? 0x7a7448 : 0x2f5fb8, roughness: 0.9, metalness: 0.05 });
-  const vest = new THREE.MeshStandardMaterial({ color, roughness: 0.7, metalness: 0.2 });
-  const skin = new THREE.MeshStandardMaterial({ color: 0x9c7d5f, roughness: 0.8, metalness: 0 }); // v3.10: was 0x8a6f52 — warmer/lighter skin
-  const gun = new THREE.MeshStandardMaterial({ color: 0x3a4048, roughness: 0.45, metalness: 0.8 }); // v3.10: was 0x23262b — the rifle read as a black slab
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.62, 0.3), suit);
-  torso.position.y = 1.15;
-  const vestM = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.4, 0.34), vest);
-  vestM.position.y = 1.18;
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.3), skin);
-  head.position.y = 1.66;
-  const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.19, 10, 8, 0, Math.PI * 2, 0, Math.PI / 2), vest);
-  helmet.position.y = 1.72;
-  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.85, 0.22), suit);
-  legL.position.set(-0.14, 0.43, 0);
-  const legR = legL.clone();
-  legR.position.x = 0.14;
-  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.55, 0.16), suit);
-  armL.position.set(-0.33, 1.22, 0.16);
-  armL.rotation.x = -1.15; // v3.9: left hand reaches forward to the handguard
-  const armR = armL.clone();
-  armR.position.x = 0.33;
-  armR.position.z = 0.14;
-  armR.rotation.x = -1.0; // v3.9: right hand at the grip
-  // v3.9: a full rifle, held forward at chest height — the old 0.85 m dark
-  // slab was unreadable at range, so bots looked unarmed. Receiver +
-  // barrel + handguard + magazine + stock + team-colour accent band;
-  // ~1.35 m long, muzzle ~0.85 m in front of the chest. The barrel steel
-  // is deliberately light so the rifle reads against dark containers too.
-  const gunLight = new THREE.MeshStandardMaterial({ color: 0x8d99a6, roughness: 0.35, metalness: 0.8 }); // v3.10: was 0x707b88 — lighter barrel steel reads against dark containers
-  const accent = new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.3 });
+  // --- Sturdy legs + big black boots ---
+  g.add(_box(0.26, 0.14, 0.38, M.black, -0.16, 0.07, -0.03));
+  g.add(_box(0.26, 0.14, 0.38, M.black, 0.16, 0.07, -0.03));
+  g.add(_box(0.26, 0.78, 0.28, M.suit, -0.16, 0.53, 0));
+  g.add(_box(0.26, 0.78, 0.28, M.suit, 0.16, 0.53, 0));
+  g.add(_box(0.28, 0.22, 0.06, M.suitDark, -0.16, 0.55, -0.16)); // knee pads
+  g.add(_box(0.28, 0.22, 0.06, M.suitDark, 0.16, 0.55, -0.16));
+  if (team === 'solara') { // cargo side pockets
+    g.add(_box(0.04, 0.16, 0.14, M.suitDark, -0.30, 0.45, -0.02));
+    g.add(_box(0.04, 0.16, 0.14, M.suitDark, 0.30, 0.45, -0.02));
+  }
+  // --- Belt + team-colour buckle ---
+  g.add(_box(0.74, 0.10, 0.40, M.black, 0, 0.97, 0));
+  g.add(_box(0.12, 0.08, 0.03, M.team, 0, 0.97, -0.21));
+  // --- Broad chest: Solara red tac-vest; Bastion blue shirt + dark vest ---
+  g.add(_box(0.74, 0.56, 0.38, team === 'solara' ? M.vest : M.suit, 0, 1.28, 0));
+  if (team === 'solara') {
+    g.add(_box(0.09, 0.44, 0.04, M.vestDark, -0.18, 1.30, -0.20)); // straps
+    g.add(_box(0.09, 0.44, 0.04, M.vestDark, 0.18, 1.30, -0.20));
+    g.add(_box(0.14, 0.16, 0.08, M.vestDark, -0.20, 1.14, -0.21)); // pouches
+    g.add(_box(0.14, 0.16, 0.08, M.vestDark, 0, 1.14, -0.21));
+    g.add(_box(0.14, 0.16, 0.08, M.vestDark, 0.20, 1.14, -0.21));
+  } else {
+    g.add(_box(0.76, 0.48, 0.06, M.vest, 0, 1.30, -0.20)); // vest plate
+    g.add(_box(0.13, 0.15, 0.02, M.gold, -0.22, 1.42, -0.26)); // POLICE badge
+    g.add(_box(0.14, 0.16, 0.04, M.team, 0.20, 1.38, -0.24)); // blue pouch
+    g.add(_box(0.14, 0.16, 0.04, M.team, 0.20, 1.16, -0.24));
+  }
+  // --- Neck + VERY wide shoulders ---
+  g.add(_box(0.18, 0.10, 0.18, M.skin, 0, 1.56, 0));
+  g.add(_box(0.22, 0.10, 0.42, M.suitDark, -0.44, 1.56, 0)); // shoulder pads
+  g.add(_box(0.22, 0.10, 0.42, M.suitDark, 0.44, 1.56, 0));
+  // --- HUGE muscular arms, reaching forward to the rifle ---
+  // Solara: bare skin arms (reference); Bastion: blue sleeves.
+  const armMat = team === 'solara' ? M.skin : M.suit;
+  // Upper arms: angled out-down from the wide shoulders.
+  g.add(_box(0.26, 0.38, 0.26, armMat, -0.42, 1.38, -0.05, 0.25, 0.12));
+  g.add(_box(0.26, 0.38, 0.26, armMat, 0.42, 1.38, -0.05, 0.25, -0.12));
+  // Bicep bulges — the "berotot" read.
+  g.add(_box(0.30, 0.22, 0.30, armMat, -0.45, 1.40, -0.06));
+  g.add(_box(0.30, 0.22, 0.30, armMat, 0.45, 1.40, -0.06));
+  // Forearms: long, reaching forward-in to the rifle grips.
+  g.add(_box(0.24, 0.52, 0.24, armMat, -0.26, 1.24, -0.40, 0.95, 0.45));
+  g.add(_box(0.24, 0.48, 0.24, armMat, 0.34, 1.24, -0.26, 0.95, -0.35));
+  // Black gloves ON the rifle grips (front grip left, rear grip right).
+  g.add(_box(0.17, 0.15, 0.17, M.black, -0.02, 1.32, -0.60));
+  g.add(_box(0.17, 0.15, 0.17, M.black, 0.18, 1.32, -0.48));
+  // Head (hitbox anchor — keep 0.30 at y 1.66) + per-name headgear.
+  const head = _box(0.30, 0.30, 0.30, M.skin, 0, 1.66, 0);
+  g.add(head);
+  g.userData.head = head;
+  _headgear(g, team, name, M);
+  // --- Rifle (fallback proc): held DIAGONALLY across the chest, stock at
+  // the right shoulder, muzzle forward-left. Group origin is the receiver
+  // centre; at (0.12, 1.35, -0.52) + yaw 0.55 the stock rear clears the
+  // chest front (x 0.39 > torso half-width 0.37) and the muzzle lands at
+  // ~(-0.11, 1.37, -0.97) — nothing passes through the torso. The old
+  // centred pose (z -0.15, yaw 0) ran the receiver straight THROUGH the
+  // chest and the stock out the back — that was the clipping the user saw.
+  // Team read: BIG band + team-coloured magazine.
   const rifle = new THREE.Group();
-  const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.15, 0.55), gun);
-  const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.5), gunLight);
+  const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.15, 0.55), M.gun);
+  const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.5), M.gunLight);
   barrel.position.set(0, 0.02, -0.5);
-  const muzzle = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.1), gunLight);
+  const muzzle = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.1), M.gunLight);
   muzzle.position.set(0, 0.02, -0.78);
-  const handguard = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.12, 0.32), gun);
+  const handguard = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.12, 0.32), M.gun);
   handguard.position.set(0, 0, -0.3);
-  const mag = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.24, 0.13), gunLight);
+  const mag = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.24, 0.13), M.team);
   mag.position.set(0, -0.17, 0.05);
   mag.rotation.x = 0.25;
-  const stock = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.13, 0.28), gun);
+  const stock = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.13, 0.28), M.gun);
   stock.position.set(0, 0, 0.38);
-  const band = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.05, 0.12), accent);
-  band.position.set(0, 0.09, -0.05);
-  const sight = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.08, 0.12), gunLight);
-  sight.position.set(0, 0.11, -0.05);
+  const band = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.14, 0.26), M.team);
+  band.position.set(0, 0.10, -0.18); // v3.11: collar proud of the rail on all sides
+  const sight = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.08, 0.12), M.gunLight);
+  sight.position.set(0, 0.19, -0.05);
   for (const m of [receiver, barrel, muzzle, handguard, mag, stock, band, sight]) {
     m.castShadow = true;
     rifle.add(m);
   }
   rifle.name = 'proc-rifle'; // v3.10: swapped for the real SCAR-L GLB when it loads
-  rifle.position.set(0.08, 1.3, -0.15);
-  for (const m of [torso, vestM, head, helmet, legL, legR, armL, armR]) {
-    m.castShadow = true;
-    g.add(m);
-  }
+  rifle.position.set(0.12, 1.38, -0.58);
+  rifle.rotation.y = 0.50;
+  rifle.rotation.x = -0.08;
   g.add(rifle);
-  g.userData.head = head;
   return g;
 }
 
@@ -140,7 +286,7 @@ export class Bot {
     this.stuckTimer = 0; this.lastPos = new THREE.Vector3();
     this.retargetTimer = 0;
     this.quietTimer = 0; // v3.10: seconds since last enemy contact (hunt trigger)
-    this.mesh = buildBotMesh(team);
+    this.mesh = buildBotMesh(team, name); // v3.11: per-name voxel headgear
     scene.add(this.mesh);
     this.weapon = team === 'bastion' ? 'ar77' : (rng() < 0.5 ? 'ar77' : 'vex9');
     this.damage = this.weapon === 'ar77' ? 13 : 10; // per-hit vs player
@@ -173,13 +319,25 @@ export class Bot {
     // Remove the viewmodel's floating hands outright (the bot mesh has its
     // own arms reaching forward); the muzzle Object3D stays, harmless.
     for (const h of [...rifle.children]) if (h.name === 'vm-hand') rifle.remove(h);
-    const band = new THREE.Mesh(
-      new THREE.BoxGeometry(0.11, 0.05, 0.14),
-      new THREE.MeshStandardMaterial({ color: TEAM_COLORS[this.team], roughness: 0.5, metalness: 0.3 }),
-    );
-    band.position.set(0, 0.09, -0.05);
-    rifle.add(band);
-    rifle.position.set(0.08, 1.28, -0.12);
+    // v3.11: team markers that sit OUTSIDE the GLB body. A top band does
+    // NOT work here — the SCAR-L handguard box swallows it whole (proven
+    // by the viewmodel close-up: the band existed in the scene graph but
+    // rendered invisible). Side plates on the receiver + a mag sleeve
+    // around the magazine are proud of the GLB on every side.
+    const teamMat = new THREE.MeshStandardMaterial({ color: TEAM_COLORS[this.team], roughness: 0.5, metalness: 0.3 });
+    for (const sx of [-1, 1]) {
+      const plate = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.12, 0.30), teamMat);
+      plate.position.set(sx * 0.045, 0.02, -0.10); // v3.11: GLB is only +/-0.028 wide — plates hug the receiver
+      plate.name = 'team-plate';
+      rifle.add(plate);
+    }
+    const sleeve = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.18, 0.18), teamMat);
+    sleeve.position.set(0, -0.13, 0.06);
+    sleeve.name = 'team-sleeve';
+    rifle.add(sleeve);
+    rifle.position.set(0.12, 1.38, -0.58); // v3.11: diagonal-forward, matches proc-rifle
+    rifle.rotation.y = 0.50;
+    rifle.rotation.x = -0.08;
     this.mesh.add(rifle);
   }
   get eye() { return new THREE.Vector3(this.pos.x, this.pos.y + 1.55, this.pos.z); }
@@ -257,7 +415,7 @@ export class Bot {
       const sp = BOT_SPEED * (this.state === 'retreat' ? 1.15 : 1);
       this.pos.x += (dx / dist) * sp * dt;
       this.pos.z += (dz / dist) * sp * dt;
-      this.yaw = Math.atan2(-dx, -dz) + Math.PI;
+      this.yaw = Math.atan2(-dx, -dz); // v3.11: no +PI — that faced bots exactly backwards (facing-check cos -1.0)
       // Simple collision: stop at colliders.
       for (const c of this.map.colliders) {
         if (this.pos.x > c.minX - 0.35 && this.pos.x < c.maxX + 0.35
@@ -469,7 +627,7 @@ export class Bot {
     if (this.goal && !enemy) this.stepTowardGoal(dt);
     else if (this.goal && enemy && this.state !== 'engage') {
       // Strafe slightly while engaging instead of walking into the open.
-      this.yaw = Math.atan2(-(enemy.pos.x - this.pos.x), -(enemy.pos.z - this.pos.z)) + Math.PI;
+      this.yaw = Math.atan2(-(enemy.pos.x - this.pos.x), -(enemy.pos.z - this.pos.z)); // v3.11: no +PI
     }
     // --- Combat (blinded bots cannot shoot) --------------------------------------
     // v3.8: bots only shoot during the round — during freeze/buy (and the
@@ -479,7 +637,7 @@ export class Bot {
     if (enemy && this.blindT <= 0 && ctx.phase === 'round') {
       this.state = 'engage';
       const to = enemy.pos;
-      this.yaw = Math.atan2(-(to.x - this.pos.x), -(to.z - this.pos.z)) + Math.PI;
+      this.yaw = Math.atan2(-(to.x - this.pos.x), -(to.z - this.pos.z)); // v3.11: no +PI
       // v3.10: empty mag -> reload (no fire while reloading). The reload
       // timer ticks at the top of update(); this branch just starts it.
       if (this.reloading > 0) {

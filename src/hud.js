@@ -49,6 +49,29 @@ export class HUD {
     this.flashFx = el('div', 'flashfx', this.root);
     // --- Banner (centre) ---
     this.banner = el('div', 'banner', this.root);
+    // --- v3.11 death overlay: unmissable — the "freeze after 2 kills"
+    // report is most plausibly a death the player never noticed (the old
+    // death notice was one small status line, while dead players can't
+    // move and holding teammates look frozen). Inline styles on purpose:
+    // no index.html touch (UI builder's file). pointer-events none so it
+    // never blocks clicks / re-locking.
+    this.deathOverlay = el('div', 'death-overlay hidden', this.root);
+    Object.assign(this.deathOverlay.style, {
+      position: 'fixed', left: '50%', top: '34%', transform: 'translate(-50%,-50%)',
+      textAlign: 'center', pointerEvents: 'none', zIndex: '60',
+      background: 'rgba(10,10,14,0.72)', border: '2px solid #e0352b',
+      borderRadius: '14px', padding: '18px 34px',
+    });
+    this.deathTitle = el('div', 'death-title', this.deathOverlay);
+    Object.assign(this.deathTitle.style, {
+      color: '#ff5a4e', fontSize: '44px', fontWeight: '900', letterSpacing: '2px',
+      textShadow: '0 2px 12px rgba(0,0,0,0.8)',
+    });
+    this.deathTitle.textContent = '☠ YOU ARE DEAD';
+    this.deathSub = el('div', 'death-sub', this.deathOverlay);
+    Object.assign(this.deathSub.style, {
+      color: '#fff', fontSize: '17px', fontWeight: '600', marginTop: '6px',
+    });
     // --- v3.8 kill banners: HEADSHOT (top-right) + multi-kill (centre-low) ---
     this.killBanner = el('div', 'killbanner hidden', this.root);
     this.multiBanner = el('div', 'multibanner hidden', this.root);
@@ -527,6 +550,14 @@ export class HUD {
         this.statusMsg.classList.remove('hidden');
       } else this.statusMsg.classList.add('hidden');
     }
+    // v3.11 death overlay: show while dead, hide on respawn (round start).
+    if (!p.alive && s.phase !== 'matchEnd') {
+      this.deathOverlay.classList.remove('hidden');
+      const rt = Math.max(0, Math.ceil(s.timer));
+      this.deathSub.textContent = s.phase === 'round'
+        ? `Round ends in ${Math.floor(rt / 60)}:${String(rt % 60).padStart(2, '0')} — you respawn next round`
+        : 'Next round starting…';
+    } else this.deathOverlay.classList.add('hidden');
     // Health / money / ammo / weapon slots / utility.
     this.hpFill.style.width = `${p.hp}%`;
     this.hpFill.style.background = p.hp > 50 ? '#6fc3d8' : p.hp > 25 ? '#ffb347' : '#e05a4e';

@@ -74,11 +74,15 @@ export class HUD {
     // --- Buy menu (backdrop dims the bright snow behind it) ---
     this.buyBackdrop = el('div', 'buy-backdrop hidden', this.root);
     this.buy = el('div', 'buy hidden', this.root);
-    el('div', 'buy-title', this.buy).textContent = 'BUY — FREEZE TIME';
-    this.buyItems = el('div', 'buy-items', this.buy);
-    this.buyMoney = el('div', 'buy-money', this.buy);
+    const buyHead = el('div', 'buy-head', this.buy);
+    el('div', 'buy-title', buyHead).textContent = 'BUY — FREEZE TIME';
+    this.buyMoney = el('div', 'buy-money', buyHead);
+    this.buySquad = el('div', 'buy-squad', this.buy);
+    this.buyItems = el('div', 'buy-grid', this.buy);
     this._buildBuy();
-    el('div', 'buy-hint', this.buy).textContent = 'Press B to close · Click an item to buy';
+    const buyFoot = el('div', 'buy-foot', this.buy);
+    el('div', 'buy-econ', buyFoot).textContent = 'Win +$3,250 · Loss +$1,900 (+$500/streak, max $2,900) · Kill +$300 · Plant +$300';
+    el('div', 'buy-hint', buyFoot).textContent = 'Hotkeys: [1–0] Buy · [B] Close';
     // --- Start / end overlays ---
     this.startOverlay = el('div', 'overlay', this.root);
     this.startOverlay.innerHTML = `<h1>FROSTLINE</h1>
@@ -92,16 +96,17 @@ export class HUD {
     this._lastBanner = '';
   }
   _buildBuy() {
-    const sections = [
+    // Three-column grid like the reference armory: rifles | sidearms & utility | gear.
+    const columns = [
       ['RIFLES', [['ar77', 'AR-77 Rifle'], ['vex9', 'Vex-9 SMG'], ['longbow', 'Longbow-7 Sniper']]],
-      ['PISTOLS', [['p9', 'P9 Pistol']]],
-      ['UTILITY', [['he', 'HE Grenade'], ['smoke', 'Smoke Grenade'], ['flash', 'Flashbang']]],
+      ['SIDEARMS & UTILITY', [['p9', 'P9 Pistol'], ['he', 'HE Grenade'], ['smoke', 'Smoke Grenade'], ['flash', 'Flashbang']]],
       ['GEAR', [['vest', 'Light Vest'], ['armor', 'Kevlar Vest'], ['kit', 'Defuse Kit']]],
     ];
-    for (const [title, items] of sections) {
-      el('div', 'buy-section', this.buyItems).textContent = title;
+    for (const [title, items] of columns) {
+      const col = el('div', 'buy-col', this.buyItems);
+      el('div', 'buy-section', col).textContent = title;
       for (const [id, label] of items) {
-        const row = el('button', 'buy-item', this.buyItems);
+        const row = el('button', 'buy-item', col);
         row.dataset.id = id;
         row.dataset.label = label;
         row.addEventListener('click', () => {
@@ -116,6 +121,7 @@ export class HUD {
   }
   refreshBuy() {
     this.buyMoney.textContent = `Money: $${this.player.money}`;
+    this._refreshSquad();
     for (const row of this.buyItems.querySelectorAll('.buy-item')) {
       const id = row.dataset.id;
       const def = WEAPONS[id];
@@ -133,7 +139,7 @@ export class HUD {
         stats = `DMG ${def.damage} · RPM ${def.rpm} · MAG ${def.mag}`;
       }
       const icon = BUY_ICONS[id] ? `<img class="buy-img" src="assets/buy-icons/${BUY_ICONS[id]}.webp" alt="">` : '';
-      row.innerHTML = `${icon}<span class="buy-name"></span><span class="buy-stats"></span><span class="buy-price"></span>`;
+      row.innerHTML = `${icon}<div class="buy-card-top"><span class="buy-name"></span><span class="buy-price"></span></div><span class="buy-stats"></span>`;
       row.querySelector('.buy-name').textContent = row.dataset.label;
       row.querySelector('.buy-stats').textContent = stats;
       row.querySelector('.buy-price').textContent = `$${price}`;
@@ -248,7 +254,22 @@ export class HUD {
     g.beginPath(); g.arc(C, C, C - 2, 0, Math.PI * 2); g.stroke();
   }
 
+  // Squad row: You + the four Solara bots (real names, roles, weapons).
+  // Called on open and every frame while the menu is open, because bots are
+  // only cached once the game loop has run at least one update.
+  _refreshSquad() {
+    if (!this._bots) return;
+    const mates = [{ name: 'YOU', role: this.player.hasBomb ? 'Carrier' : 'Entry', weapon: this.player.weapon.def.name, money: this.player.money }];
+    for (const b of this._bots) {
+      if (b.team !== 'solara') continue;
+      mates.push({ name: b.name, role: b.role, weapon: WEAPONS[b.weapon] ? WEAPONS[b.weapon].name : b.weapon });
+    }
+    this.buySquad.innerHTML = mates.map((m) => `<div class="buy-mate"><b>${m.name}</b><span>${m.role} · ${m.weapon}${m.money !== undefined ? ` · $${m.money}` : ''}</span></div>`).join('');
+  }
+
   update(dt, bots, events) {
+    this._bots = bots; // cached so the buy menu can render the squad row.
+    if (this.buyOpen) this._refreshSquad();
     const p = this.player, s = this.sim;
     // Drain sim events.
     for (const e of events) {

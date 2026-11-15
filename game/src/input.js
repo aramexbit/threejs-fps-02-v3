@@ -21,7 +21,12 @@ export class Input {
     this.onLockChange = onLockChange || (() => {});
     this.canvas = canvas;
     window.addEventListener('keydown', (e) => {
-      if (e.repeat) return;
+      // v3.11: a held key auto-repeats — re-add it to `keys` on repeat so
+      // movement resumes by itself after a window blur cleared the set
+      // (before this, a W held through a blur never re-registered until
+      // the player released and re-pressed it: "can't move" with no error).
+      // Edge-triggered `pressed` is untouched by repeats.
+      if (e.repeat) { this.keys.add(e.code); return; }
       this.keys.add(e.code);
       this.pressed.add(e.code);
       if (e.code === 'KeyR' || e.code === 'KeyB' || e.code === 'KeyG' || e.code === 'KeyQ' || e.code === 'Digit1' || e.code === 'Digit2' || e.code === 'Digit3' || e.code === 'Digit4' || e.code === 'Space') e.preventDefault();

@@ -99,6 +99,22 @@ export class Player {
     if (this.slots[index].def.id === 'ar77' && this._glbRifle) {
       group = this._glbRifle.group.clone();
       muzzle = group.getObjectByName('muzzle');
+      // v3.11: the player's own rifle is Solara red — a red band on the
+      // viewmodel so "my weapon" is unmistakable vs the enemy's blue.
+      // (Bots carry the same band in their team colour; the old viewmodel
+      // had no team colour at all, so all rifles looked identical.)
+      // v3.11: same team markers as the bot rifles (see bots.js) — a top
+      // band is swallowed by the GLB handguard, so the red reads via the
+      // receiver side plates + the mag sleeve instead.
+      const teamMat = new THREE.MeshStandardMaterial({ color: 0xe0352b, roughness: 0.5, metalness: 0.3 });
+      for (const sx of [-1, 1]) {
+        const plate = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.12, 0.30), teamMat);
+        plate.position.set(sx * 0.045, 0.02, -0.10); // v3.11: GLB is only +/-0.028 wide — plates hug the receiver
+        group.add(plate);
+      }
+      const sleeve = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.18, 0.18), teamMat);
+      sleeve.position.set(0, -0.13, 0.06);
+      group.add(sleeve);
     } else {
       ({ group, muzzle } = buildViewmodel(this.slots[index].def.id));
     }

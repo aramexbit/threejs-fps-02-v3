@@ -1,23 +1,26 @@
-// sky.js — sunset over the snow yard: orange horizon, purple mid-sky,
-// dark indigo zenith, low sun in the east-south-east, warm dusk fog.
-// The sky is a gradient dome with a low sun disc and glow baked into the
+// sky.js — bright daytime over the snow yard: pale blue horizon, deeper
+// blue overhead, high white sun in the east-south-east, pale blue-white
+// haze. v3.6 replaces the v3.5 sunset (orange horizon, purple dusk,
+// low orange sun) — the snow goes back to white and the containers read
+// in their blue/green/rust colours again instead of near-black silhouettes.
+// The sky is a gradient dome with a high sun disc and glow baked into the
 // shader, plus procedural cloud bands. The same sky is fed through a PMREM
 // generator so every PBR material gets image-based lighting from the actual
 // sky — the single biggest realism win for an outdoor scene. Fog is
-// exponential, warm and thin (aerial perspective: far lanes fade into warm
+// exponential, pale and thin (aerial perspective: far lanes fade into day
 // haze, never cut to black).
 import * as THREE from 'three';
 
-// Sunset, low in the east-south-east — it sits in the play/start/end shots
-// (all three look east) so the low sun disc + glow read in frame, and the
-// crane + containers go backlit like the reference. Shared by the sky
-// shader, the directional light, and the warm/cool CoD look: orange sun
-// vs purple shadows.
-export const SUN_DIR = new THREE.Vector3(0.62, 0.20, 0.28).normalize();
-export const SUN_COLOR = 0xff9a3d; // v3.5 sunset: deep orange (was 0xffd9a6 golden)
-export const HORIZON_COLOR = new THREE.Color(0xff8a3d); // vivid sunset orange
-export const MID_COLOR = new THREE.Color(0x9a5578); // purple-magenta dusk band
-export const ZENITH_COLOR = new THREE.Color(0x4a4a7a); // indigo-violet overhead — kept luminous: 0x2f3358 was so dark the whole scene went dark with it
+// Day sun, high in the east-south-east — it sits in the play/start/end shots
+// (all three look east) so the high sun disc + glow read in frame, and the
+// crane + containers are lit from the front-side, not backlit like the
+// sunset cut. Shared by the sky shader, the directional light, and the
+// neutral day grade.
+export const SUN_DIR = new THREE.Vector3(0.55, 0.75, 0.25).normalize();
+export const SUN_COLOR = 0xfff3da; // v3.6 day: pale warm white (was 0xff9a3d deep orange)
+export const HORIZON_COLOR = new THREE.Color(0xcfe2f2); // pale horizon blue
+export const MID_COLOR = new THREE.Color(0x7fb0e2); // sky blue
+export const ZENITH_COLOR = new THREE.Color(0x3a76c4); // deeper blue overhead
 
 const SKY_VERT = /* glsl */`
 varying vec3 vDir;
@@ -38,23 +41,21 @@ uniform vec3 uSunColor;
 void main() {
   vec3 d = normalize(vDir);
   float h = clamp(d.y, -0.08, 1.0);
-  // Sunset gradient, three stops: orange horizon -> purple dusk band ->
-  // dark indigo overhead.
+  // Day gradient, three stops: pale horizon blue -> sky blue ->
+  // deeper blue overhead.
   vec3 col = mix(uHorizon, uMid, smoothstep(0.0, 0.22, h));
   col = mix(col, uZenith, smoothstep(0.18, 0.65, h));
-  // Warmth toward the sun's azimuth — orange light spilling across the
-  // snow, purple everywhere else (the CoD warm/cool contrast, sunset cut).
-  // Kept modest: 0.55 drowned the whole sky in orange on the first pass.
+  // A whisper of warmth toward the sun's azimuth — just enough to keep
+  // the sky from looking flat, far below the sunset's 0.45 spill.
   float toward = pow(max(dot(normalize(vec3(d.x, 0.0, d.z)), normalize(vec3(uSunDir.x, 0.0, uSunDir.z))), 0.0), 2.0);
-  col += uSunColor * toward * (1.0 - pow(max(h, 0.0), 0.6)) * 0.45;
-  // Below the horizon: warm dark ground haze, not black.
-  col = mix(vec3(0.32, 0.20, 0.16), col, smoothstep(-0.08, 0.02, d.y));
-  // Low sun disc + halo. The halo was 0.9/0.35 and blew the whole sun
-  // side of the sky into one orange wall; halved.
+  col += uSunColor * toward * (1.0 - pow(max(h, 0.0), 0.6)) * 0.12;
+  // Below the horizon: pale blue-gray haze, not black.
+  col = mix(vec3(0.72, 0.80, 0.88), col, smoothstep(-0.08, 0.02, d.y));
+  // High sun disc + small halo.
   float s = dot(d, normalize(uSunDir));
   float disc = smoothstep(0.9988, 0.9994, s);
-  float halo = pow(max(s, 0.0), 120.0) * 0.45 + pow(max(s, 0.0), 10.0) * 0.18;
-  col += uSunColor * halo + vec3(1.0, 0.85, 0.6) * disc * 2.2;
+  float halo = pow(max(s, 0.0), 120.0) * 0.35 + pow(max(s, 0.0), 10.0) * 0.10;
+  col += uSunColor * halo + vec3(1.0, 0.95, 0.85) * disc * 2.0;
   gl_FragColor = vec4(col, 1.0);
 }`;
 
@@ -80,25 +81,25 @@ export function createSky() {
   return mesh;
 }
 
-// Sunset cloud bands: dark mauve bodies with a warm orange underglow,
-// placed high and far so they read as dusk cloud. Seeded, static.
+// Day clouds: white bodies with a soft blue-gray underside, placed high
+// and far so they read as daytime cloud. Seeded, static.
 export function createClouds(seed = 4) {
   const group = new THREE.Group();
   const c = document.createElement('canvas');
   c.width = 256; c.height = 96;
   const g = c.getContext('2d');
   const grad = g.createRadialGradient(128, 48, 4, 128, 48, 120);
-  grad.addColorStop(0, 'rgba(52,36,72,0.9)');
-  grad.addColorStop(0.55, 'rgba(110,52,80,0.45)');
-  grad.addColorStop(1, 'rgba(110,52,80,0)');
+  grad.addColorStop(0, 'rgba(255,255,255,0.92)');
+  grad.addColorStop(0.55, 'rgba(255,255,255,0.45)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
   g.fillStyle = grad;
   g.fillRect(0, 0, 256, 96);
-  // Warm underglow along the bottom edge, like a cloud lit from below
-  // by the setting sun.
-  const warm = g.createLinearGradient(0, 48, 0, 96);
-  warm.addColorStop(0, 'rgba(255,140,60,0)');
-  warm.addColorStop(1, 'rgba(255,140,60,0.4)');
-  g.fillStyle = warm;
+  // Soft blue-gray shading along the bottom edge, like a cloud shaded
+  // from below.
+  const shade = g.createLinearGradient(0, 48, 0, 96);
+  shade.addColorStop(0, 'rgba(170,195,220,0)');
+  shade.addColorStop(1, 'rgba(170,195,220,0.35)');
+  g.fillStyle = shade;
   g.fillRect(0, 0, 256, 96);
   const t = new THREE.CanvasTexture(c);
   const spots = [
@@ -109,7 +110,7 @@ export function createClouds(seed = 4) {
   for (const [x, y, z, w] of spots) {
     const m = new THREE.Mesh(
       new THREE.PlaneGeometry(w, w * 0.36),
-      new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, fog: false, opacity: 0.5 }),
+      new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, fog: false, opacity: 0.6 }),
     );
     m.position.set(x, y, z);
     m.lookAt(0, y * 0.4, 0);
@@ -126,23 +127,22 @@ export function applyEnvironment(renderer, scene, skyMesh) {
   envScene.add(skyMesh.clone());
   const rt = pmrem.fromScene(envScene, 0.04);
   scene.environment = rt.texture;
-  scene.environmentIntensity = 0.9; // v3.5 rebalance 2: 0.65 left the scene dark — the sunset env is dark overhead, so it needs more weight, not less, once the zenith is luminous again
+  scene.environmentIntensity = 0.8; // v3.6 day: bright blue sky feeds more light than the dusk env, so slightly less weight (was 0.9)
   pmrem.dispose();
   return rt;
 }
 
-// Lights: dusk hemisphere (purple sky above, warm dark snow below), the low
-// orange sunset with a 2048 shadow map fitted to the level AABB, and a faint
-// warm fill from the fire side so shadowed faces never go black. PCSS is not
-// available in the vendored core (no examples/jsm), so shadows use PCF +
-// radius — the honest fallback the design doc allows.
+// Lights: day hemisphere (blue sky above, bright snow bounce below), the
+// high white sun with a 2048 shadow map fitted to the level AABB, and a
+// faint cool fill from the opposite side so shadowed faces never go black.
+// PCSS is not available in the vendored core (no examples/jsm), so shadows
+// use PCF + radius — the honest fallback the design doc allows.
 export function createLights(scene) {
-  const hemi = new THREE.HemisphereLight(0xc8bce0, 0x9a8074, 1.1); // v3.5 rebalance 2: brighter, paler lavender skylight — 1.0 with the darker sky colour still left the snow dark red-brown (snow-box avg (88,45,41))
+  const hemi = new THREE.HemisphereLight(0xbfd9ff, 0xe8eef2, 1.25); // v3.6 day: neutral blue sky + snow bounce (was lavender 1.1)
   scene.add(hemi);
-  // The directional sun is paler than the sky's sun colour: full-strength
-  // orange (0xff9a3d) at 3.2 turned the snow monochrome red on the first
-  // pass. Paler + dimmer keeps the snow white with a warm tint.
-  const sun = new THREE.DirectionalLight(0xffc07a, 3.0);
+  // White noon-ish sun: full-strength orange turned the snow monochrome
+  // red in v3.5, so the day sun is pale warm white instead.
+  const sun = new THREE.DirectionalLight(0xfff4e0, 3.0);
   sun.position.copy(SUN_DIR).multiplyScalar(60);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -154,9 +154,9 @@ export function createLights(scene) {
   sun.shadow.radius = 3; // v3.2 Gemini review: harder shadows for the CoD high-contrast look (was 6)
   scene.add(sun);
   scene.add(sun.target);
-  const fill = new THREE.DirectionalLight(0xffd9b0, 0.4); // v3.2: stronger warm bounce (was 0.25)
+  const fill = new THREE.DirectionalLight(0xdfeaf5, 0.35); // v3.6: cool sky fill (was 0xffd9b0 warm bounce 0.4)
   fill.position.set(28, 14, 30);
   scene.add(fill);
-  scene.fog = new THREE.FogExp2(0xd9a98e, 0.005); // v3.5 sunset: pale warm dusk haze — the first pass (0xcf8f6a, 0.006) was too saturated and red
+  scene.fog = new THREE.FogExp2(0xd6e4ee, 0.004); // v3.6 day: pale blue-white haze, thinner than the dusk fog for day clarity
   return { hemi, sun, fill };
 }

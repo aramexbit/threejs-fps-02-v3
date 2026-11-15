@@ -30,7 +30,7 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap; // r187 removed PCFSoftShadowMap; PCF + radius 4 is the soft fallback
 renderer.toneMapping = THREE.AgXToneMapping;
-renderer.toneMappingExposure = 1.3; // Rebalance after v3.1 screenshots: 1.45 blew the snow out to flat white (was 1.05 in v3)
+renderer.toneMappingExposure = 1.2; // v3.6 day: 1.3 was tuned for the darker sunset; the bright day sky needs a touch less (1.45 blew the snow out to flat white in v3.1)
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
@@ -105,7 +105,7 @@ hud.audio = audio;
 // game must never die for a cosmetic pass.
 const POST_VERT = `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`;
 const POST_FRAG = `
-// CoD-style grade: teal-orange split tone, S-curve contrast, film grain,
+// Day grade (v3.6): near-neutral, S-curve contrast, film grain,
 // subtle chromatic aberration, stronger vignette. Written from scratch.
 varying vec2 vUv; uniform sampler2D tDiffuse; uniform float uTime;
 float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -120,13 +120,15 @@ void main(){
   c.b = texture2D(tDiffuse, vUv - d * ca).b;
   // S-curve contrast.
   c = clamp((c - 0.5) * 1.10 + 0.5, 0.0, 1.0);
-  // Teal-orange split grade: shadows toward cool teal, highlights warm.
+  // v3.6 day: near-neutral grade — the teal-orange split tone was tuned
+  // for the sunset; in daylight it only tints the snow. A whisper of cool
+  // shadows / warm highlights remains.
   float l = dot(c, vec3(0.299, 0.587, 0.114));
-  vec3 shadowTint = vec3(0.93, 1.02, 1.07);
-  vec3 highTint = vec3(1.03, 1.0, 0.97); // v3.2: softer — 1.07 pushed bright snow pink
+  vec3 shadowTint = vec3(0.98, 1.00, 1.03);
+  vec3 highTint = vec3(1.01, 1.00, 0.99);
   c *= mix(shadowTint, highTint, smoothstep(0.12, 0.78, l));
-  // A touch of saturation (was 1.1 — it pushed the sunset orange further).
-  c = mix(vec3(l), c, 1.05);
+  // A touch of saturation (was 1.05 — it pushed the sunset orange further).
+  c = mix(vec3(l), c, 1.02);
   // Vignette.
   float vig = 1.0 - r2 * 0.35;
   c *= vig;

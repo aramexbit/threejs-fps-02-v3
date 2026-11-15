@@ -184,12 +184,10 @@ export class Fire {
       scene.add(s);
       this.flames.push(s);
     }
-    // v3.5 rebalance: the point light was 24*scale with distance 22, and
-    // five of them in mid-field summed into a red wash that drowned the
-    // snow (snow-box avg RGB went from (192,173,163) in v3.4 to (119,39,29)).
-    // The flame sprites are the visible fire; the light is now a local
-    // warm pool at the barrel, not a flood across mid.
-    this.light = new THREE.PointLight(0xff6a00, 12, 15, 1.5);
+    // v3.6 day: fires are small daytime fires, not the dominant warm
+    // light — the point light is a local warm pool at the barrel (was
+    // 12/distance 15 in v3.5, which washed mid-field red when five summed).
+    this.light = new THREE.PointLight(0xff7a20, 6, 10, 1.5);
     this.light.position.copy(pos);
     this.light.position.y += 0.8;
     scene.add(this.light);
@@ -199,7 +197,7 @@ export class Fire {
     this.t += dt;
     // Flicker: sum of two sines, deterministic.
     const f = 0.75 + 0.25 * Math.sin(this.t * 11.3) * Math.sin(this.t * 5.1 + 1.7);
-    this.light.intensity = 9 * this.scale * f; // v3.5: was 24 — the old value washed mid-field red (see constructor note)
+    this.light.intensity = 5 * this.scale * f; // v3.6 day: was 9 — small daytime fires only
     for (let i = 0; i < this.flames.length; i++) {
       const s = this.flames[i];
       const w = (0.75 + 0.3 * Math.sin(this.t * 9 + i * 2.1)) * this.scale;

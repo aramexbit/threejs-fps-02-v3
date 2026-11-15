@@ -22,7 +22,12 @@ export const SPAWNS = {
   // spawned there could never move (proven 16 Nov: the Bastion carrier
   // Hail spawned there and stayed put for a whole round). (13,16) is clear
   // ground just west of the block, still on the Bastion side of site B.
-  bastion: [{ x: 20, z: -14 }, { x: 20, z: -10 }, { x: 20, z: 10 }, { x: 13, z: 16 }, { x: 18, z: 0 }],
+  // v3.13 fix 2: (20,-14) and (20,-10) sat INSIDE the foundry east wall
+  // collider (x 20.2..21.0) — the spawnAt safety net handled them, but
+  // clear spawns are better than relying on the net. (19.5,-14) then
+  // landed inside the foundry furnace collider (x 17.1..19.3, z -15.4..-13.8),
+  // so the first spawn is (19.5,-13) instead — clear of both.
+  bastion: [{ x: 19.5, z: -13 }, { x: 19.5, z: -10 }, { x: 20, z: 10 }, { x: 13, z: 16 }, { x: 18, z: 0 }],
 };
 
 function std(params) { return new THREE.MeshStandardMaterial(params); }
@@ -643,11 +648,27 @@ export function buildMap(scene) {
   scene.add(group);
 
   // --- Waypoints: lanes + site approaches -----------------------------------------
+  // v3.13 fix (16 Nov, Node audit): 5 waypoints sat INSIDE colliders, so no
+  // bot could ever stand on them and BFS routes through them were dead.
+  // [-12,0] was on the sandbag wall -> [-12,-2] (south of the sandbags; the
+  // [-12,2] detour landed inside the (-14,2) container). [8,-12] was inside
+  // the (6,-13) container -> [8,-9] (north of it AND north of the (5,-11.4)
+  // barrel that blocks the (2,-12)->(8,-10) line). [8,12] was inside the
+  // (8,10) container -> [8,14] (south side). [0,6] was on the bonfire
+  // woodpile -> [2,6]. [12,-6] was on the foundry east wall -> [12,-4]
+  // (mid side; the wall has no gap there, so no north/mid junction).
+  // [-4,-12] -> [-4,-15]: the (-6,-12) sandbag wall sits across the north
+  // lane between (-10,-12) and (-4,-12); the lane jogs north around it.
+  // REVERTED (16 Nov): (-4,-15) sits 0.05 m from a crate at (-4,-14) and
+  // its (-4,-15)->(2,-12) line is blocked by a tree at (-2,-14). The
+  // original (-4,-12) is a valid node (links to (2,-12) and (0,-6)); the
+  // west/east north-lane join is done by the new bridge node (-2,-10)
+  // below, which links (-10,-12), (2,-12) and (0,-6).
   const pts = [
-    [-20, 0], [-16, 0], [-12, 0], [-8, 0], [-4, 0], [0, 0], [4, 0], [8, 0], [12, 0], [16, 0], [20, 0],
-    [-16, -12], [-10, -12], [-4, -12], [2, -12], [8, -12], [13, -12], [17, -12],
-    [-16, 12], [-10, 12], [-4, 12], [2, 12], [8, 12], [13, 12], [17, 12],
-    [-12, -6], [-12, 6], [0, -6], [0, 6], [12, -6], [12, 6],
+    [-20, 0], [-16, 0], [-12, -2], [-8, 0], [-4, 0], [0, 0], [4, 0], [8, 0], [12, 0], [16, 0], [20, 0],
+    [-16, -12], [-10, -12], [-4, -12], [2, -12], [8, -9], [13, -12], [17, -12],
+    [-16, 12], [-10, 12], [-4, 12], [2, 12], [8, 14], [13, 12], [17, 12],
+    [-12, -6], [-12, 6], [0, -6], [2, 6], [12, -4], [12, 6], [-2, -10],
     [15, -8], [15, 8], [19, -12], [19, 12],
   ];
   const waypoints = pts.map(([x, z]) => ({ x, z, links: [] }));

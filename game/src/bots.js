@@ -413,7 +413,14 @@ export class Bot {
       if (d < bd) { bd = d; start = i; }
     });
     this.wp = start;
-    if (start === dest) { this.path = [dest]; return; }
+    // v3.13 fix (16 Nov, proven by carrier diagnostic): when the bot and the
+    // goal share the same nearest waypoint, the path must be EMPTY so the
+    // final leg steers straight at the goal. The old `path = [dest]` made
+    // the bot walk onto the waypoint, shift it off (within 0.4 m), recompute
+    // [dest] next frame, shift again — forever. A bot 1.9 m from a site
+    // centre never closed the last 1.5 m, so the carrier never planted
+    // (and walkers never "reached" a site).
+    if (start === dest) { this.path = []; return; }
     const prev = new Array(wps.length).fill(-1);
     const queue = [start];
     prev[start] = start;

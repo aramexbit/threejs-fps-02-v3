@@ -116,13 +116,12 @@
   .buy-mate { flex: 1; background: rgba(9,17,30,.8); border: 1px solid var(--line); border-left: 3px solid var(--red-bright); border-radius: 8px; padding: 7px 9px; min-width: 0; }
   .buy-mate b { display: block; font-size: 12px; color: var(--ink); }
   .buy-mate span { font-size: 11px; color: var(--muted); }
-  .buy-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  .buy-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; }
   .buy-col { min-width: 0; }
   .buy-section { font-size: 12px; font-weight: 900; letter-spacing: .14em; color: var(--gold); margin: 10px 0 6px; }
   .buy-item { display: block; width: 100%; padding: 10px 12px; margin-bottom: 6px; background: #131e33; color: var(--ink); border: 1px solid var(--line); border-radius: 8px; font-size: 15px; font-weight: 700; cursor: pointer; text-align: left; transition: border-color .12s, background .12s; }
   .buy-item:hover { border-color: var(--gold); background: #1a2742; }
   .buy-item.buy-owned { opacity: .55; }
-  .buy-img { width: 100%; height: 64px; object-fit: contain; background: #0a1220; border-radius: 6px; margin-bottom: 8px; }
   .buy-card-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
   .buy-name { text-align: left; }
   .buy-stats { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin-top: 3px; }
@@ -134,6 +133,38 @@
   /* v3.10: gear button, status line, settings panel, pause buttons */
   .gearbtn { position: absolute; top: 14px; right: 16px; pointer-events: auto; background: var(--navy); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px 13px; font-size: 13px; font-weight: 800; cursor: pointer; letter-spacing: .04em; }
   .gearbtn:hover { border-color: var(--gold); color: var(--gold); }
+  /* v3.13: help button (next to gear), help panel, plant/defuse prompt,
+     scoreboard, difficulty tag. */
+  .helpbtn { position: absolute; top: 14px; right: 138px; pointer-events: auto; background: var(--navy); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px 13px; font-size: 13px; font-weight: 800; cursor: pointer; letter-spacing: .04em; }
+  .helpbtn:hover { border-color: var(--gold); color: var(--gold); }
+  .help { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 640px; max-width: 92vw; max-height: 86vh; overflow: auto; background: var(--navy-2); border: 1px solid var(--line); border-radius: 12px; padding: 22px 24px; pointer-events: auto; box-shadow: 0 12px 40px rgba(0,0,0,.6); z-index: 30; }
+  .help-title { font-size: 20px; font-weight: 900; letter-spacing: .06em; color: var(--gold); margin-bottom: 12px; }
+  .help-row { display: flex; gap: 12px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,.06); font-size: 14px; }
+  .help-key { flex: 0 0 130px; font-weight: 900; color: var(--gold); }
+  .help-desc { color: var(--ink); }
+  .help-foot { font-size: 12px; color: var(--muted); margin-top: 12px; line-height: 1.5; }
+  .help-close { display: block; margin: 16px auto 0; padding: 10px 28px; background: var(--gold); color: #0d1117; border: none; border-radius: 8px; font-size: 14px; font-weight: 900; letter-spacing: .06em; cursor: pointer; }
+  /* Plant/defuse prompt — big gold pulse when an action is available. */
+  .plantprompt { position: absolute; left: 50%; bottom: 30%; transform: translateX(-50%); font-size: 15px; font-weight: 800; letter-spacing: .05em; color: var(--gold); background: var(--navy); border: 1px solid rgba(255,210,74,.4); border-radius: 999px; padding: 7px 18px; white-space: nowrap; }
+  .plantprompt-big { font-size: 24px; padding: 10px 24px; animation: pulse 1.2s infinite; border-color: var(--gold); box-shadow: 0 0 24px rgba(255,210,74,.35); }
+  /* Difficulty tag under the top cluster. */
+  .difftag { position: absolute; top: 172px; left: 50%; transform: translateX(-50%); font-size: 11px; font-weight: 800; letter-spacing: .14em; color: var(--muted); background: rgba(9,17,30,.7); border: 1px solid var(--line); border-radius: 999px; padding: 3px 12px; white-space: nowrap; }
+  .diff-line { font-size: 14px; color: var(--muted); margin: 8px 0 0; }
+  .diff-line b { color: var(--gold); }
+  /* Scoreboard (end of match). */
+  .sb-win { color: var(--gold) !important; }
+  .sb-lose { color: #ff5a4e !important; }
+  .sb-tables { display: flex; gap: 16px; margin: 14px 0 6px; max-width: 94vw; }
+  .sb-team { background: var(--navy-2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; min-width: 300px; }
+  .sb-team h3 { margin: 0 0 8px; font-size: 15px; letter-spacing: .12em; }
+  .sb-sol h3 { color: var(--red-bright); } .sb-bas h3 { color: var(--blue-bright); }
+  .sb-table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  .sb-table th { color: var(--muted); font-size: 11px; letter-spacing: .1em; text-align: right; padding: 3px 8px; }
+  .sb-table th:first-child, .sb-table td:first-child { text-align: left; }
+  .sb-table td { text-align: right; padding: 4px 8px; font-weight: 700; }
+  .sb-table td.sb-name { color: var(--ink); }
+  .sb-again { display: block; margin: 14px auto 0; padding: 12px 34px; background: var(--gold); color: #0d1117; border: none; border-radius: 8px; font-size: 16px; font-weight: 900; letter-spacing: .06em; cursor: pointer; }
+  .sb-again:hover { filter: brightness(1.1); }
   .statusmsg { position: absolute; left: 50%; top: 63%; transform: translateX(-50%); font-size: 15px; font-weight: 800; letter-spacing: .05em; color: var(--gold); background: var(--navy); border: 1px solid rgba(255,210,74,.4); border-radius: 999px; padding: 6px 16px; white-space: nowrap; }
   .settings { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 560px; max-width: 92vw; background: var(--navy-2); border: 1px solid var(--line); border-radius: 12px; padding: 22px 24px; pointer-events: auto; box-shadow: 0 12px 40px rgba(0,0,0,.6); }
   .settings-title { font-size: 20px; font-weight: 900; letter-spacing: .06em; color: var(--gold); margin-bottom: 14px; }

@@ -76,6 +76,11 @@ export class Player {
     this.grounded = true;
     this.viewmodel = null; this.muzzle = null;
     this._glbRifle = null; // v3.7: CC0 SCAR-L viewmodel, set async once loaded
+    // v3.13: grenade throw animation — {t, dur, type, spawned} while a
+    // throw is in flight; _savedVm holds the weapon viewmodel underneath.
+    this.throwAnim = null;
+    this._savedVm = null; // {group, muzzle, vmBase, reloadMag}
+    this._grenadeGroup = null;
     this.equip(0);
   }
   // v3.7: swap the AR-77 viewmodel to the CC0 GLB rifle once it loads.
@@ -123,9 +128,11 @@ export class Player {
     // v3.12: reload-mag prop — a spare magazine that drops out mid-reload
     // and rises back in as the fresh mag. Driven in applyCamera(); hidden
     // outside a reload. Sits in the mag well (local y -0.13, z 0.06).
+    // v3.13: bigger + team-red so the mag swap actually reads against the
+    // gunmetal (the old dark 0.07 mag vanished inside the GLB rifle).
     const rmag = new THREE.Mesh(
-      new THREE.BoxGeometry(0.07, 0.16, 0.10),
-      new THREE.MeshStandardMaterial({ color: 0x2a2e33, roughness: 0.5, metalness: 0.6 }),
+      new THREE.BoxGeometry(0.08, 0.20, 0.12),
+      new THREE.MeshStandardMaterial({ color: 0xc22e24, roughness: 0.5, metalness: 0.4 }),
     );
     rmag.name = 'reload-mag';
     rmag.visible = false;
@@ -134,14 +141,25 @@ export class Player {
     // CoD-style viewmodel pose: bigger, closer, barrel angled toward the
     // frame centre. Scale/pose per weapon kind; stock rear must stay in
     // front of the camera near plane (z < -0.1) or it clips.
+    // v3.13 (item 2): per-weapon RELOAD profile — dip (m), tilt (rad) and
+    // the mag-well position the spare-mag prop travels to/from. The v3.12
+    // animation existed for every weapon in code, but the mag prop sat
+    // INSIDE the AR-77 GLB's own magazine (and off the well on Vex-9 /
+    // Longbow), so the only visible part — the mag swap — vanished and
+    // players read it as "no reload animation except the pistol". Each
+    // weapon now has its own well position, a bigger dip/tilt, and the mag
+    // drops OUT to the side (silhouetted, not buried in the receiver).
     const pose = {
-      p9: { s: 1.3, x: 0.27, y: -0.25, z: -0.50, ry: 0.06 },
-      vex9: { s: 1.4, x: 0.29, y: -0.26, z: -0.55, ry: 0.10 },
-      ar77: { s: 1.4, x: 0.30, y: -0.27, z: -0.55, ry: 0.12 },
-      longbow: { s: 1.2, x: 0.30, y: -0.27, z: -0.62, ry: 0.10, adsLift: 0.15 }, // v3.7 fix: stock rear was at z=-0.02 (inside the 0.1 near plane) so the stock clipped into a giant slab; s 1.2 / z -0.62 puts the rear at -0.164. adsLift aligns the scope (local y 0.055 x 1.2 = 0.066) with the crosshair in ADS — without it the scope sat ~0.15 below the sight line and the stock bulk filled the lower screen.
-      he: { s: 1.3, x: 0.26, y: -0.25, z: -0.48, ry: 0.05 },
-    }[this.slots[index].def.id] || { s: 1.3, x: 0.26, y: -0.24, z: -0.45, ry: 0 };
+      p9: { s: 1.3, x: 0.27, y: -0.25, z: -0.50, ry: 0.06, dip: 0.12, tilt: 0.55, mag: { x: 0, y: -0.10, z: 0.05 } },
+      vex9: { s: 1.4, x: 0.29, y: -0.26, z: -0.55, ry: 0.10, dip: 0.14, tilt: 0.60, mag: { x: 0, y: -0.12, z: -0.10 } },
+      ar77: { s: 1.4, x: 0.30, y: -0.27, z: -0.55, ry: 0.12, dip: 0.16, tilt: 0.65, mag: { x: 0, y: -0.13, z: 0.06 } },
+      longbow: { s: 1.2, x: 0.30, y: -0.27, z: -0.62, ry: 0.10, adsLift: 0.15, dip: 0.18, tilt: 0.70, mag: { x: 0, y: -0.11, z: -0.04 } }, // v3.7 fix: stock rear was at z=-0.02 (inside the 0.1 near plane) so the stock clipped into a giant slab; s 1.2 / z -0.62 puts the rear at -0.164. adsLift aligns the scope (local y 0.055 x 1.2 = 0.066) with the crosshair in ADS — without it the scope sat ~0.15 below the sight line and the stock bulk filled the lower screen.
+      he: { s: 1.3, x: 0.26, y: -0.25, z: -0.48, ry: 0.05, dip: 0, tilt: 0, mag: { x: 0, y: 0, z: 0 } },
+    }[this.slots[index].def.id] || { s: 1.3, x: 0.26, y: -0.24, z: -0.45, ry: 0, dip: 0.12, tilt: 0.55, mag: { x: 0, y: -0.13, z: 0.06 } };
     this.vmBase = pose;
+    this._reloadDip = pose.dip;
+    this._reloadTilt = pose.tilt;
+    this._magBase = pose.mag;
     group.scale.setScalar(pose.s);
     group.rotation.y = pose.ry;
     group.position.set(pose.x, pose.y, pose.z);
@@ -192,7 +210,20 @@ export class Player {
 
   // One fixed step of movement + look. `input` is the Input object.
   update(dt, input, t) {
-    if (!this.alive) return;
+    if (!this.alive) {
+      // v3.13: dying mid-throw must not leave the grenade viewmodel stuck.
+      if (this.throwAnim) { this._restoreWeaponVm(); this.throwAnim = null; }
+      return;
+    }
+    // v3.13: grenade throw animation — the grenade leaves the hand at
+    // t = 0.15 s (the release point of the swing); the weapon viewmodel
+    // comes back when the 0.45 s animation ends.
+    if (this.throwAnim) {
+      const ta = this.throwAnim;
+      ta.t += dt;
+      if (!ta.spawned && ta.t >= 0.15) { ta.spawned = true; this._spawnGrenade(ta.type); }
+      if (ta.t >= ta.dur) { this._restoreWeaponVm(); this.throwAnim = null; }
+    }
     this.crouching = input.crouch;
     const { dx, dy } = input.takeMouse();
     // v3.10: mouse look honours the settings panel (sensitivity + invert-Y).
@@ -303,46 +334,75 @@ export class Player {
       // then comes back up. Progress p runs 0 -> 1 over the weapon's
       // reloadTime (reloading counts down in update()). The dip eases in
       // over the first 30%, holds, and returns over the last 30%.
-      // Timing/ammo untouched — this is visual only.
+      // v3.13: dip/tilt come from the weapon's own profile (item 2) and
+      // the rifle also CANTS toward the camera mid-reload, so the mag
+      // well faces the player while the mag swaps. Timing/ammo untouched.
       let reloadP = 0, dip = 0;
       const w = this.weapon;
       if (w && w.reloading > 0) {
         reloadP = Math.min(1, Math.max(0, 1 - w.reloading / w.def.reloadTime));
         dip = reloadP < 0.3 ? reloadP / 0.3 : reloadP > 0.7 ? (1 - reloadP) / 0.3 : 1;
       }
+      const rd = this._reloadDip ?? 0.12;
+      const rt = this._reloadTilt ?? 0.55;
+      // v3.13: THROW SWING — during a grenade throw the hand winds up
+      // (back + down) and then swings forward + up to release. swing runs
+      // -1 (wind-up) -> +1 (release) -> 0 (settle). Only while the
+      // grenade viewmodel is actually showing.
+      let swing = 0;
+      const throwing = this.throwAnim && this.viewmodel === this._grenadeGroup;
+      if (throwing) {
+        const tp = this.throwAnim.t / this.throwAnim.dur;
+        if (tp < 0.35) swing = -Math.sin((tp / 0.35) * Math.PI / 2);
+        else if (tp < 0.7) swing = Math.sin(((tp - 0.35) / 0.35) * Math.PI / 2);
+        else swing = 1 - (tp - 0.7) / 0.3;
+        // The hand is empty after the release point (t = 0.15 s).
+        this.viewmodel.visible = tp < 0.33;
+      } else if (this.viewmodel.visible === false && !this.throwAnim) {
+        this.viewmodel.visible = true;
+      }
       this.viewmodel.position.set(
         vm.x * (1 - ads) + bobX * 0.4 * (1 - dip * 0.7),
-        vm.y + bobY * 0.5 * (1 - dip * 0.7) + (ads ? 0.055 + lift : 0) - dip * 0.12,
-        vm.z + kick + (ads ? -0.30 : 0) + dip * 0.05,
+        vm.y + bobY * 0.5 * (1 - dip * 0.7) + (ads ? 0.055 + lift : 0) - dip * rd + swing * 0.10,
+        vm.z + kick + (ads ? -0.30 : 0) + dip * 0.05 - swing * 0.18,
       );
-      this.viewmodel.rotation.x = this.recoilPitch * 1.4 + Math.sin(this.bobPhase) * 0.008 + dip * 0.55;
+      this.viewmodel.rotation.x = this.recoilPitch * 1.4 + Math.sin(this.bobPhase) * 0.008 + dip * rt + swing * 0.6;
       this.viewmodel.rotation.z = dip * 0.35;
-      // v3.12: spare-mag prop — old mag drops out (p 0.25–0.55), fresh mag
-      // rises back into the well (p 0.6–0.9). One mesh, two phases.
+      // v3.12: spare-mag prop — old mag drops out, fresh mag rises back
+      // into the well. v3.13: the path starts at THIS weapon's mag well
+      // (item 2) and drops OUT to the shooter's left, silhouetted against
+      // open air instead of buried inside the receiver.
       if (this._reloadMag) {
         const rm = this._reloadMag;
-        if (reloadP >= 0.25 && reloadP < 0.55) {
-          const q = (reloadP - 0.25) / 0.30;
+        const mb = this._magBase || { x: 0, y: -0.13, z: 0.06 };
+        if (reloadP >= 0.2 && reloadP < 0.5) {
+          const q = (reloadP - 0.2) / 0.30;
           rm.visible = true;
-          rm.position.set(-0.03 * q, -0.13 - q * 0.35, 0.06 + q * 0.05);
-          rm.rotation.x = q * 0.5;
-        } else if (reloadP >= 0.6 && reloadP < 0.9) {
-          const q = (reloadP - 0.6) / 0.30;
+          rm.position.set(mb.x - 0.12 * q, mb.y - q * 0.38, mb.z + q * 0.06);
+          rm.rotation.x = q * 0.6;
+          rm.rotation.z = q * 0.3;
+        } else if (reloadP >= 0.55 && reloadP < 0.9) {
+          const q = (reloadP - 0.55) / 0.35;
           rm.visible = true;
-          rm.position.set(0, -0.48 + q * 0.35, 0.06);
-          rm.rotation.x = (1 - q) * 0.5;
+          rm.position.set(mb.x - 0.12 * (1 - q), mb.y - 0.38 + q * 0.38, mb.z + 0.06 * (1 - q));
+          rm.rotation.x = (1 - q) * 0.6;
+          rm.rotation.z = (1 - q) * 0.3;
         } else {
           rm.visible = false;
+          rm.rotation.set(0, 0, 0);
         }
       }
-      // ADS straightens the rifle so the sight sits dead centre.
-      this.viewmodel.rotation.y = (this.vmBase ? this.vmBase.ry : 0) * (1 - ads);
+      // ADS straightens the rifle so the sight sits dead centre. Mid-reload
+      // the rifle cants toward the camera (v3.13) so the mag swap reads.
+      this.viewmodel.rotation.y = (this.vmBase ? this.vmBase.ry : 0) * (1 - ads) + dip * 0.30 * (1 - ads);
     }
     this.flashT = Math.max(0, this.flashT - 0.05);
   }
 
   // Fire the current weapon. Returns a shot event for sim.js to resolve.
   tryFire(t, rng) {
+    // v3.13: no shooting mid-throw — the hands are busy with the grenade.
+    if (this.throwAnim) return null;
     const w = this.weapon;
     if (!w.fire(t)) {
       // v3.9: auto-reload on empty. Without it the gun goes dead after the
@@ -389,8 +449,18 @@ export class Player {
   }
   throwGrenade(t) {
     const type = this.grenadeType;
-    if (this.grenades[type] <= 0 || this.grenade) return false;
+    if (this.grenades[type] <= 0 || this.grenade || this.throwAnim) return false;
     this.grenades[type]--;
+    // v3.13: the throw is an ANIMATION, not an instant spawn. The grenade
+    // viewmodel swaps in, winds up, and releases at t = 0.15 s (see
+    // update()); the weapon comes back at 0.45 s. Pattern studied from
+    // weichu2002/ThreeJS_FPS_2.0 (throwBall) + Gabry9110/CS-Clone-Fable5
+    // (grenade ballistics) — implemented from scratch here.
+    this.throwAnim = { t: 0, dur: 0.45, type, spawned: false };
+    this._swapToGrenadeVm();
+    return true;
+  }
+  _spawnGrenade(type) {
     const dir = new THREE.Vector3(0, 0, -1).applyEuler(this.camera.rotation);
     this.grenade = {
       type,
@@ -398,7 +468,43 @@ export class Player {
       vel: dir.multiplyScalar(13).add(new THREE.Vector3(0, 4.5, 0)),
       fuse: WEAPONS[type].fuse,
     };
-    return true;
+  }
+  // Swap the weapon viewmodel for the grenade in-hand during a throw.
+  // The weapon group is saved (not destroyed) and restored when the throw
+  // ends — or left alone if the player switched weapons mid-throw (then
+  // the new weapon is already showing and the restore is a no-op).
+  _swapToGrenadeVm() {
+    if (this._savedVm) return;
+    this._savedVm = { group: this.viewmodel, muzzle: this.muzzle, vmBase: this.vmBase, reloadMag: this._reloadMag };
+    const { group, muzzle } = buildViewmodel('he');
+    this._grenadeGroup = group;
+    if (this.viewmodel) this.camera.remove(this.viewmodel);
+    group.scale.setScalar(1.3);
+    group.rotation.y = 0.05;
+    group.position.set(0.26, -0.25, -0.48);
+    this.viewmodel = group;
+    this.muzzle = muzzle;
+    this.vmBase = { x: 0.26, y: -0.25, z: -0.48, ry: 0.05 };
+    this._reloadMag = null;
+    this.camera.add(group);
+  }
+  _restoreWeaponVm() {
+    const s = this._savedVm;
+    const g = this._grenadeGroup;
+    this._savedVm = null;
+    this._grenadeGroup = null;
+    if (!s || !g) return;
+    // Only swap back if the grenade is still the visible viewmodel. If
+    // the player equipped another weapon mid-throw, that weapon is already
+    // showing and must not be replaced by the stale saved group.
+    if (this.viewmodel !== g) return;
+    this.camera.remove(this.viewmodel);
+    this.viewmodel = s.group;
+    this.muzzle = s.muzzle;
+    this.vmBase = s.vmBase;
+    this._reloadMag = s.reloadMag;
+    this.viewmodel.visible = true;
+    this.camera.add(this.viewmodel);
   }
   _detonateGrenade(g) {
     const p = g.pos.clone();

@@ -9,6 +9,7 @@ import * as THREE from 'three';
 import { rayAABB, raySphere } from './player.js';
 import { TEAM_COLORS } from './palette.js';
 import { WEAPONS } from './weapons.js';
+import { settings, DIFFICULTY } from './settings.js';
 
 const BOT_SPEED = 3.9;
 const BOT_HP = 100;
@@ -280,6 +281,19 @@ export class Bot {
     this.weapon = team === 'bastion' ? 'ar77' : (rng() < 0.5 ? 'ar77' : 'vex9');
     this.damage = this.weapon === 'ar77' ? 13 : 10; // per-hit vs player
     this.accuracy = 0.55;
+    // v3.13: difficulty (settings.js) — applied at spawnAt() each round,
+    // so a change in Settings applies from the next round on.
+    this.hpMax = 100; this.reactMult = 1;
+    this.spawnIdx = 0; // index inside the team (set in sim.startRound)
+    // v3.13: formation jitter — each bot's fixed offset from its spawn
+    // point while the squad gathers during freeze.
+    this.formJitter = { x: (rng() - 0.5) * 3, z: (rng() - 0.5) * 3 };
+    this._lastPhase = 'freeze'; // round-start hunt trigger (item 3b)
+    // v3.13: bot HE grenade — rare, telegraphed, one per bot per ~25 s.
+    this.nadeCd = 18 + rng() * 10;
+    this.throwT = 0; // seconds left in the throw animation (0 = not throwing)
+    this._nadeSpawned = false;
+    this._throwPose = 0; // smoothed 0..1, drives the rifle in _syncMesh
     // v3.10: bot ammo — bots never reloaded (they shot empty forever once
     // the mag ran out in a long fight). Mag + reserve from the weapon table;
     // reserve is infinite (bots don't buy ammo), the reload TIME is the cost.
@@ -338,6 +352,16 @@ export class Bot {
     this.reloading = 0;
     this.lastSeen = null; this.huntTarget = null; this.idleTimer = 0;
     this.path = []; this._pathGoal = null; // v3.10: BFS path resets on spawn
+    // v3.13: difficulty applies here (item 8) — HP, aim, reaction, damage.
+    const d = DIFFICULTY[settings.difficulty] || DIFFICULTY.normal;
+    this.hpMax = d.hp;
+    this.hp = d.hp;
+    this.accuracy = 0.55 * d.accMult;
+    this.damage = (this.weapon === 'ar77' ? 13 : 10) * d.dmgMult;
+    this.reactMult = d.reactMult;
+    this.nadeCd = 18 + this.rng() * 10;
+    this.throwT = 0; this._nadeSpawned = false; this._throwPose = 0;
+    this._lastPhase = 'freeze';
   }
   assignSite(site) { this.site = site; }
   nearestWaypoint() {
@@ -503,7 +527,7 @@ export class Bot {
     // the enemy is NEWLY spotted; a continuously visible enemy lets the
     // timer run down and the bot fire its bursts.
     if (enemy && !this._hadEnemy) {
-      this.reaction = 0.25 + this.rng() * 0.35;
+      this.reaction = (0.25 + this.rng() * 0.35) * this.reactMult; // v3.13: difficulty
       ctx.onRadio(this, `Contact ${siteNameFor(enemy.pos, this.map)} — ${enemy.isPlayer ? 'one hostile!' : 'enemy spotted!'}`);
     }
     this._hadEnemy = !!enemy;
@@ -525,52 +549,84 @@ export class Bot {
     } else if (!enemy && this.ammo < WEAPONS[this.weapon].mag * 0.5) {
       this.reloading = WEAPONS[this.weapon].reloadTime;
     }
-    // --- Objective state ------------------------------------------------------
+    // v3.13 (item 3a): during freeze the squad GATHERS in a tight
+    // formation at its own spawn — nobody wanders to a site before GO.
+    // The gather goal is only (re)set when the bot has none, so the BFS
+    // path is computed once, not every frame.
+    // v3.13 (item 3b): the moment the round starts, every bot gets a hunt
+    // goal at once (enemy spawn / last-seen / sweep) instead of waiting
+    // 10 s of quiet — the round opens with movement, not camping.
+    if (ctx.phase === 'freeze') {
+      const sp = ctx.map.spawns[this.team][this.spawnIdx % ctx.map.spawns[this.team].length];
+      this.state = 'gather';
+      if (!this.goal) this.goal = { x: sp.x + this.formJitter.x, z: sp.z + this.formJitter.z };
+      this._lastPhase = 'freeze';
+      if (this.goal) this.stepTowardGoal(dt);
+      this._syncMesh(dt);
+      return;
+    }
+    if (this._lastPhase === 'freeze' && ctx.phase === 'round') {
+      this.goal = this._pickHuntGoal(ctx);
+      this.state = 'hunt';
+      this.retargetTimer = 8;
+      this.quietTimer = 0;
+    }
+    this._lastPhase = ctx.phase;
+    // --- Objective state (v3.13: role-based, not team-hardcoded) --------------
+    // Attackers push + plant; defenders hold + defuse. Which team attacks
+    // alternates every round (sim.attackTeam) — the old code assumed
+    // Solara always attacks and Bastion always defends.
+    const isAttacker = this.team === ctx.attackTeam;
     const sitePos = this.site && ctx.map.sites[this.site] ? ctx.map.sites[this.site].center : null;
     if (ctx.bombPlanted) {
       const bs = ctx.map.sites[ctx.bombSite].center;
-      if (this.team === 'bastion') {
+      if (isAttacker) {
+        this.state = 'hold';
+        this.goal = { x: bs.x + (this.rng() - 0.5) * 6, z: bs.z + (this.rng() - 0.5) * 6 };
+      } else {
         this.state = 'defuse';
         this.goal = { x: bs.x, z: bs.z };
-      } else {
-        this.state = 'hold';
-        this.goal = { x: bs.x + (this.rng() - 0.5) * 4, z: bs.z + (this.rng() - 0.5) * 4 };
       }
     } else if (ctx.bombDropped) {
-      // v3.10: a dropped bomb must be recovered (Solara) or guarded
-      // (Bastion) — never ignored while the round is live.
-      this.state = this.team === 'solara' ? 'recover' : 'guard';
+      // v3.10: a dropped bomb must be recovered (attackers) or guarded
+      // (defenders) — never ignored while the round is live.
+      this.state = isAttacker ? 'recover' : 'guard';
       this.goal = { x: ctx.bombDropped.pos.x, z: ctx.bombDropped.pos.z };
-    } else if (this.team === 'bastion') {
-      this.state = sitePos ? 'hold' : 'patrol';
-      // v3.10 HUNT: 10 s without contact — stop camping the site and sweep
-      // the lanes / last-seen spot instead of standing still all round.
-      if (this.quietTimer > 10 && (!this.goal || this.retargetTimer <= 0)) {
-        this.goal = this._pickHuntGoal(ctx);
-        this.state = 'hunt';
-        this.retargetTimer = 12;
-        this.quietTimer = 0;
-      } else if (sitePos && (!this.goal || this.retargetTimer <= 0)) {
-        this.goal = { x: sitePos.x + (this.rng() - 0.5) * 5, z: sitePos.z + (this.rng() - 0.5) * 5 };
-        this.retargetTimer = 6;
-      }
-    } else {
-      // Attackers push their site; carrier plants when the site is clear.
-      if (this.isCarrier && sitePos && ctx.siteClear(this.site)) {
+    } else if (isAttacker) {
+      // Carrier plants when the site is clear of defenders. The carrier
+      // never takes a hunt goal or rotates to a heard shot — the bomb goes
+      // to the site, always.
+      if (this.isCarrier && sitePos && ctx.siteClear(this.site, this.team)) {
         this.state = 'plant';
         this.goal = { x: sitePos.x, z: sitePos.z };
-      } else if (this.quietTimer > 10 && (!this.goal || this.retargetTimer <= 0)) {
-        // v3.10 HUNT: 10 s without contact — push the enemy spawn / the
-        // other site instead of shuffling around the same site goal.
+      } else if (!this.isCarrier && this.quietTimer > 6 && (!this.goal || this.retargetTimer <= 0)) {
+        // v3.10 HUNT (threshold 10 s -> 6 s in v3.13): stop shuffling
+        // around the same site goal and sweep the lanes / last-seen spot.
         this.goal = this._pickHuntGoal(ctx);
         this.state = 'hunt';
         this.retargetTimer = 12;
         this.quietTimer = 0;
       } else if (sitePos && (!this.goal || this.retargetTimer <= 0)) {
-        this.goal = { x: sitePos.x + (this.rng() - 0.5) * 4, z: sitePos.z + (this.rng() - 0.5) * 4 };
-        this.retargetTimer = 8;
+        this.goal = { x: sitePos.x + (this.rng() - 0.5) * 6, z: sitePos.z + (this.rng() - 0.5) * 6 };
+        this.retargetTimer = 5;
       } else {
         this.state = 'push';
+      }
+      if (!this.isCarrier && this.alert > 0 && this.alertPos && !enemy) {
+        this.goal = { x: this.alertPos.x, z: this.alertPos.z };
+      }
+    } else {
+      this.state = sitePos ? 'hold' : 'patrol';
+      // v3.13: defenders hunt too — 6 s without contact and they sweep a
+      // lane instead of standing at the site all round.
+      if (this.quietTimer > 6 && (!this.goal || this.retargetTimer <= 0)) {
+        this.goal = this._pickHuntGoal(ctx);
+        this.state = 'hunt';
+        this.retargetTimer = 12;
+        this.quietTimer = 0;
+      } else if (sitePos && (!this.goal || this.retargetTimer <= 0)) {
+        this.goal = { x: sitePos.x + (this.rng() - 0.5) * 6, z: sitePos.z + (this.rng() - 0.5) * 6 };
+        this.retargetTimer = 5;
       }
       if (this.alert > 0 && this.alertPos && !enemy) {
         this.goal = { x: this.alertPos.x, z: this.alertPos.z };
@@ -618,12 +674,12 @@ export class Bot {
       // Strafe slightly while engaging instead of walking into the open.
       this.yaw = Math.atan2(-(enemy.pos.x - this.pos.x), -(enemy.pos.z - this.pos.z)); // v3.11: no +PI
     }
-    // --- Combat (blinded bots cannot shoot) --------------------------------------
+    // --- Combat (blinded bots cannot shoot; throwing bots hold fire) --------
     // v3.8: bots only shoot during the round — during freeze/buy (and the
     // end-of-round pause) they stay silent by design. Without this gate the
     // stationary player is killed at spawn before the round even starts
     // (diagnosed 15 Nov: dead at simTime ~1.4 s, still in freeze).
-    if (enemy && this.blindT <= 0 && ctx.phase === 'round') {
+    if (enemy && this.blindT <= 0 && ctx.phase === 'round' && this.throwT <= 0) {
       this.state = 'engage';
       const to = enemy.pos;
       this.yaw = Math.atan2(-(to.x - this.pos.x), -(to.z - this.pos.z)); // v3.11: no +PI
@@ -652,6 +708,30 @@ export class Bot {
         }
       }
     }
+    // v3.13: bot HE grenade — rare, telegraphed. An enemy visible at
+    // 10–25 m with the cooldown ready starts a 0.6 s wind-up (the rifle
+    // swings up, see _syncMesh); the grenade leaves at 0.3 s in and flies
+    // the same parabola as the player's (sim.onBotGrenade). Never while
+    // planting, defusing, reloading or retreating. One per bot per ~25 s.
+    this.nadeCd -= dt;
+    if (this.throwT > 0) {
+      this.throwT -= dt;
+      if (!this._nadeSpawned && this.throwT <= 0.3) {
+        this._nadeSpawned = true;
+        if (enemy) ctx.onBotGrenade(this, enemy.pos);
+      }
+      if (this.throwT <= 0) { this.throwT = 0; this._nadeSpawned = false; }
+    } else if (enemy && this.blindT <= 0 && ctx.phase === 'round'
+      && this.state !== 'plant' && this.state !== 'defuse' && this.state !== 'retreat'
+      && this.reloading <= 0 && this.nadeCd <= 0) {
+      const d = this.pos.distanceTo(enemy.pos);
+      if (d > 10 && d < 25) {
+        this.throwT = 0.6;
+        this.nadeCd = 25;
+        this._nadeSpawned = false;
+        ctx.onRadio(this, 'Grenade out!');
+      }
+    }
     this._syncMesh(dt);
   }
   // v3.10 HUNT target picker. Priority: the last place an enemy was seen
@@ -662,8 +742,11 @@ export class Bot {
       return { x: this.lastSeen.x, z: this.lastSeen.z };
     }
     if (this.alert > 0 && this.alertPos) return { x: this.alertPos.x, z: this.alertPos.z };
-    if (this.team === 'solara') {
-      const sp = ctx.map.spawns.bastion;
+    // v3.13: attackers push the ENEMY spawn (whichever team attacks this
+    // round); defenders sweep a lane waypoint near their position.
+    if (this.team === ctx.attackTeam) {
+      const enemyTeam = this.team === 'solara' ? 'bastion' : 'solara';
+      const sp = ctx.map.spawns[enemyTeam];
       const s = sp[Math.floor(this.rng() * sp.length)];
       return { x: s.x + (this.rng() - 0.5) * 4, z: s.z + (this.rng() - 0.5) * 4 };
     }
@@ -681,20 +764,32 @@ export class Bot {
     // v3.12: RELOAD POSE — while the bot reloads (2.2 s) the rifle dips
     // down and comes back up. Smoothed so it never snaps; restores the
     // exact base pose (rotation.x -0.08, y 1.38) when done.
-    this._reloadPose = this._reloadPose || 0;
-    const rpTarget = this.reloading > 0 ? 1 : 0;
-    this._reloadPose += (rpTarget - this._reloadPose) * Math.min(1, dt * 6);
-    if (this._reloadPose > 0.01) {
-      if (!this._rifleMesh || !this._rifleMesh.parent) {
-        this._rifleMesh = this.mesh.getObjectByName('real-rifle') || this.mesh.getObjectByName('proc-rifle');
+    // v3.13: THROW POSE — while the bot winds up a grenade (0.6 s) the
+    // rifle swings up-back and then down-forward, an overhand lob.
+    // Throw wins over reload (they never coincide: the throw requires
+    // reloading <= 0); both restore the exact base pose when done.
+    if (!this._rifleMesh || !this._rifleMesh.parent) {
+      this._rifleMesh = this.mesh.getObjectByName('real-rifle') || this.mesh.getObjectByName('proc-rifle');
+    }
+    if (this.throwT > 0 && this._rifleMesh) {
+      const tp = 1 - this.throwT / 0.6;
+      const swing = Math.sin(Math.min(1, Math.max(0, tp)) * Math.PI);
+      this._rifleMesh.rotation.x = -0.08 - swing * 0.9;
+      this._rifleMesh.position.y = 1.38 + swing * 0.15;
+      this._reloadPose = 0;
+    } else {
+      this._reloadPose = this._reloadPose || 0;
+      const rpTarget = this.reloading > 0 ? 1 : 0;
+      this._reloadPose += (rpTarget - this._reloadPose) * Math.min(1, dt * 6);
+      if (this._reloadPose > 0.01) {
+        if (this._rifleMesh) {
+          this._rifleMesh.rotation.x = -0.08 - this._reloadPose * 0.5;
+          this._rifleMesh.position.y = 1.38 - this._reloadPose * 0.10;
+        }
+      } else if (this._rifleMesh) {
+        this._rifleMesh.rotation.x = -0.08;
+        this._rifleMesh.position.y = 1.38;
       }
-      if (this._rifleMesh) {
-        this._rifleMesh.rotation.x = -0.08 - this._reloadPose * 0.5;
-        this._rifleMesh.position.y = 1.38 - this._reloadPose * 0.10;
-      }
-    } else if (this._rifleMesh) {
-      this._rifleMesh.rotation.x = -0.08;
-      this._rifleMesh.position.y = 1.38;
     }
   }
 }

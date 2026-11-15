@@ -6,11 +6,10 @@
 // money, score, kill feed, buy menu, banners) is plain DOM.
 import { WEAPONS } from './weapons.js';
 import { MAX_ROUNDS } from './sim.js';
-import { settings, saveSettings } from './settings.js';
+import { settings, saveSettings, DIFFICULTY, DIFFICULTY_IDS } from './settings.js';
 
-// Buy-menu weapon images (generated icons in game/assets/buy-icons/).
-// Only the four weapons have images; utility/gear rows stay text-only.
-const BUY_ICONS = { ar77: 'ar77', vex9: 'vex9', longbow: 'longbow', p9: 'p9' };
+// (v3.13: the buy-menu weapon images are gone — the shop is text-only now,
+// so there is no icon table anymore.)
 
 function el(tag, cls, parent) {
   const e = document.createElement(tag);
@@ -107,6 +106,13 @@ export class HUD {
     this.channel = el('div', 'channel', this.root);
     this.channelFill = el('div', 'channelfill', this.channel);
     this.channelLabel = el('div', 'channellabel', this.channel);
+    // --- v3.13 (item 1): plant/defuse prompt — big, unmissable, centre.
+    // The v3.12 channel bar only appeared AFTER progress started, so a
+    // player who tapped E (or tried during freeze) saw nothing at all.
+    this.plantPrompt = el('div', 'plantprompt hidden', this.root);
+    // --- v3.13 (item 8): difficulty tag under the timer.
+    this.diffTag = el('div', 'difftag', this.root);
+    this._diffLabel = '';
     // --- Damage vignette ---
     this.damageFx = el('div', 'damagefx', this.root);
     // --- Buy menu (backdrop dims the bright snow behind it) ---
@@ -120,7 +126,16 @@ export class HUD {
     this._buildBuy();
     const buyFoot = el('div', 'buy-foot', this.buy);
     el('div', 'buy-econ', buyFoot).textContent = 'Win +$3,250 · Loss +$1,900 (+$500/streak, max $2,900) · Kill +$300 · Plant +$300';
-    el('div', 'buy-hint', buyFoot).textContent = 'Hotkeys: [1–0] Buy · [B] Close';
+    el('div', 'buy-hint', buyFoot).textContent = 'Klik atau tekan [1–0] untuk beli · [B] / [Esc] tutup · beli hanya saat freeze';
+    // --- v3.13 (item 5): help button + panel — every key and what it does.
+    this.helpBtn = el('button', 'helpbtn', this.root);
+    this.helpBtn.textContent = '? HELP';
+    this.helpBtn.addEventListener('click', () => this.onOpenHelp && this.onOpenHelp());
+    this.setHelpVisible = (v) => { this.helpBtn.style.display = v ? '' : 'none'; };
+    this.helpOpen = false;
+    this.helpPanel = el('div', 'help hidden', this.root);
+    this._buildHelp();
+    this.onOpenHelp = null; // wired by main.js (owns input lock)
     // --- v3.10 status line: explains WHY the gun is silent right now
     // (buy phase / dead / round over / reloading / no ammo). The v3.9
     // playtest report "kadang tidak bisa nembak" was partly this: the gun
@@ -153,28 +168,38 @@ export class HUD {
     this.onSettingsChange = null; // wired by main.js (key) => live apply
     this.onResume = null; // wired by main.js
     // --- Start / end overlays ---
+    // v3.13: attack/defence SWAPS every round (item 1 + item 7) — the old
+    // cards ("SOLARA ATTACK / BASTION HOLD") were only true half the time.
     this.startOverlay = el('div', 'overlay', this.root);
     this.startOverlay.innerHTML = `<h1>FROSTLINE</h1>
-      <p class="sub">Ironworks Ridge · 5v5 · Plant the bomb. Hold the snow.</p>
+      <p class="sub">Ironworks Ridge · 5v5 · Bomb mission — attack &amp; defence swap every round.</p>
       <div class="teams">
-        <div class="team-card team-sol"><b>SOLARA</b><span>ATTACK THE SITE</span></div>
-        <div class="team-card team-bas"><b>BASTION</b><span>HOLD THE SITE</span></div>
+        <div class="team-card team-sol"><b>SOLARA</b><span>ATTACK / DEFEND</span></div>
+        <div class="team-card team-bas"><b>BASTION</b><span>DEFEND / ATTACK</span></div>
       </div>
       <p class="controls">WASD move · Mouse aim · Click fire · R reload · Shift sprint · Space jump<br>
-      Ctrl crouch · Right-click aim · B buy · E plant / defuse · G grenade · 4 cycle grenade · Q switch · Esc settings</p>
+      Ctrl crouch · Right-click aim · B buy · E plant / defuse (hold) · G grenade · 4 cycle grenade · Q switch · H help · Esc settings</p>
+      <p class="diff-line">Difficulty: <b class="start-diff">NORMAL</b> · change in Settings (Esc)</p>
       <p class="cta">CLICK TO PLAY</p>`;
+    this.startDiff = this.startOverlay.querySelector('.start-diff');
     this.endOverlay = el('div', 'overlay hidden', this.root);
+    this.endOpen = false; // v3.13: true while the scoreboard is up
     this.feedItems = [];
     this.buyOpen = false;
     this._lastBanner = '';
   }
+  // v3.13 (item 6): four TEXT columns, no images — like the reference
+  // requisition screen, but our own weapons, prices and gear. Number keys
+  // 1–0 buy in reading order (shown on each row). Images are gone: the
+  // old buy-img webp files are no longer referenced anywhere.
   _buildBuy() {
-    // Three-column grid like the reference armory: rifles | sidearms & utility | gear.
     const columns = [
-      ['RIFLES', [['ar77', 'AR-77 Rifle'], ['vex9', 'Vex-9 SMG'], ['longbow', 'Longbow-7 Sniper']]],
-      ['SIDEARMS & UTILITY', [['p9', 'P9 Pistol'], ['he', 'HE Grenade'], ['smoke', 'Smoke Grenade'], ['flash', 'Flashbang']]],
+      ['SIDEARMS', [['p9', 'P9 Pistol']]],
+      ['PRIMARIES', [['ar77', 'AR-77 Rifle'], ['vex9', 'Vex-9 SMG'], ['longbow', 'Longbow-7 Sniper']]],
+      ['GRENADES', [['he', 'HE Grenade'], ['smoke', 'Smoke Grenade'], ['flash', 'Flashbang']]],
       ['GEAR', [['vest', 'Light Vest'], ['armor', 'Kevlar Vest'], ['kit', 'Defuse Kit']]],
     ];
+    this._buyItems = []; // item ids in number-key order (1..9, 0)
     for (const [title, items] of columns) {
       const col = el('div', 'buy-col', this.buyItems);
       el('div', 'buy-section', col).textContent = title;
@@ -182,6 +207,8 @@ export class HUD {
         const row = el('button', 'buy-item', col);
         row.dataset.id = id;
         row.dataset.label = label;
+        this._buyItems.push(id);
+        row.dataset.key = this._buyItems.length === 10 ? '0' : String(this._buyItems.length);
         row.addEventListener('click', () => {
           if (this.player.buy(id)) {
             this.audio && this.audio.beep();
@@ -192,6 +219,18 @@ export class HUD {
     }
     this.refreshBuy();
   }
+  // Buy by number key while the shop is open (main.js routes Digit1..0).
+  buyByKey(code) {
+    const idx = code === 'Digit0' ? 9 : parseInt(code.slice(5), 10) - 1;
+    const id = this._buyItems && this._buyItems[idx];
+    if (!id) return false;
+    if (this.player.buy(id)) {
+      this.audio && this.audio.beep();
+      this.refreshBuy();
+      return true;
+    }
+    return false;
+  }
   refreshBuy() {
     this.buyMoney.textContent = `Money: $${this.player.money}`;
     this._refreshSquad();
@@ -200,20 +239,20 @@ export class HUD {
       const def = WEAPONS[id];
       const p = this.player;
       let price, stats, owned = false;
-      if (id === 'vest') { price = 400; stats = 'ARMOR 50'; owned = p.armor >= 50; }
-      else if (id === 'armor') { price = 650; stats = 'ARMOR 100'; owned = p.armor >= 100; }
+      if (id === 'vest') { price = 400; stats = 'ARMOR 50 — blocks half of incoming damage'; owned = p.armor >= 50; }
+      else if (id === 'armor') { price = 650; stats = 'ARMOR 100 — full vest + helmet'; owned = p.armor >= 100; }
       else if (id === 'kit') { price = 400; stats = p.hasKit ? 'OWNED — DEFUSE 2.5s' : 'DEFUSE 2.5s (was 5s)'; owned = p.hasKit; }
       else if (def.kind === 'grenade') {
         price = def.price;
-        stats = id === 'he' ? 'DMG 110 · BLAST 6m' : id === 'smoke' ? 'BLOCKS SIGHT 9s' : 'BLINDS 2.5s';
+        stats = id === 'he' ? `DMG 110 · BLAST 6m — owned ×${p.grenades[id]}` : id === 'smoke' ? `BLOCKS SIGHT 9s — owned ×${p.grenades[id]}` : `BLINDS 2.5s — owned ×${p.grenades[id]}`;
         owned = p.grenades[id] >= 2;
       } else {
         price = def.price;
-        stats = `DMG ${def.damage} · RPM ${def.rpm} · MAG ${def.mag}`;
+        stats = `DMG ${def.damage} · RPM ${def.rpm} · MAG ${def.mag}${p.slots.some((w) => w.def.id === id) ? ' — OWNED' : ''}`;
+        owned = p.slots.some((w) => w.def.id === id);
       }
-      const icon = BUY_ICONS[id] ? `<img class="buy-img" src="assets/buy-icons/${BUY_ICONS[id]}.webp" alt="">` : '';
-      row.innerHTML = `${icon}<div class="buy-card-top"><span class="buy-name"></span><span class="buy-price"></span></div><span class="buy-stats"></span>`;
-      row.querySelector('.buy-name').textContent = row.dataset.label;
+      row.innerHTML = `<div class="buy-card-top"><span class="buy-name"></span><span class="buy-price"></span></div><span class="buy-stats"></span>`;
+      row.querySelector('.buy-name').textContent = `[${row.dataset.key}] ${row.dataset.label}`;
       row.querySelector('.buy-stats').textContent = stats;
       row.querySelector('.buy-price').textContent = `$${price}`;
       row.classList.toggle('buy-owned', owned);
@@ -278,6 +317,27 @@ export class HUD {
     qLow.addEventListener('click', () => { settings.quality = 'low'; saveSettings(); syncQ(); this.onSettingsChange && this.onSettingsChange('quality'); });
     qHigh.addEventListener('click', () => { settings.quality = 'high'; saveSettings(); syncQ(); this.onSettingsChange && this.onSettingsChange('quality'); });
     (this._settingsSyncs = this._settingsSyncs || []).push(syncQ);
+    // v3.13 (item 8): difficulty — bot skill. Applies from the next round
+    // (bots read it at spawn). MUDAH: bots miss more, react slower, hit
+    // softer, die faster. SULIT: sharper aim, faster reactions, harder
+    // hits, tougher bodies. NORMAL is the v3.12 baseline.
+    const dr = row('Difficulty (bot skill)');
+    const dBtns = {};
+    for (const id of DIFFICULTY_IDS) {
+      const b = el('button', 'settings-qbtn', dr);
+      b.textContent = DIFFICULTY[id].label;
+      dBtns[id] = b;
+      b.addEventListener('click', () => {
+        settings.difficulty = id;
+        saveSettings();
+        syncD();
+        this.onSettingsChange && this.onSettingsChange('difficulty');
+      });
+    }
+    const syncD = () => {
+      for (const id of DIFFICULTY_IDS) dBtns[id].classList.toggle('q-active', settings.difficulty === id);
+    };
+    (this._settingsSyncs = this._settingsSyncs || []).push(syncD);
     const foot = el('div', 'settings-foot', p);
     foot.textContent = 'Saved automatically · Esc closes · changes apply immediately';
     const close = el('button', 'settings-close', p);
@@ -285,6 +345,50 @@ export class HUD {
     close.addEventListener('click', () => this.onCloseSettings && this.onCloseSettings());
     this.onCloseSettings = null; // wired by main.js
     this._refreshSettingsPanel();
+  }
+  // v3.13 (item 5): help panel — every key, verified against input.js
+  // (not made up: WASD/mouse/LMB/RMB/R/E/B/G/4/Q/1-3/Shift/Ctrl/C/Space/
+  // Esc/H/R are all real bindings; Tab scoreboard does NOT exist and is
+  // not listed). Open with H or the ? button, close with H / Esc / CLOSE.
+  _buildHelp() {
+    const p = this.helpPanel;
+    el('div', 'help-title', p).textContent = 'KONTROL — FROSTLINE';
+    const rows = [
+      ['W A S D', 'Bergerak (maju / kiri / mundur / kanan)'],
+      ['Mouse', 'Aim (bidik)'],
+      ['Klik kiri', 'Tembak'],
+      ['Klik kanan', 'ADS — bidik besi (lebih akurat, lebih lambat)'],
+      ['R', 'Reload senjata'],
+      ['E (tahan)', 'Pasang bom — bawa bom ke SITE A / B, tahan 3 detik · Defuse bom — dekati bom terpasang, tahan sampai penuh (kit: 2,5 detik)'],
+      ['B', 'Buka shop — hanya saat freeze (15 detik sebelum ronde)'],
+      ['G', 'Lempar granat (yang sedang dipilih)'],
+      ['4', 'Ganti jenis granat: HE / Smoke / Flash'],
+      ['Q', 'Ganti senjata'],
+      ['1 / 2 / 3', 'Pilih senjata slot 1–3'],
+      ['1–0 (di shop)', 'Beli item di shop'],
+      ['Shift', 'Sprint (lari cepat)'],
+      ['Ctrl / C', 'Jongkok'],
+      ['Space', 'Lompat'],
+      ['Esc', 'Pause · tutup panel'],
+      ['H', 'Buka / tutup bantuan ini'],
+      ['R (layar akhir)', 'Main lagi'],
+    ];
+    const table = el('div', 'help-table', p);
+    for (const [key, desc] of rows) {
+      const r = el('div', 'help-row', table);
+      const k = el('span', 'help-key', r); k.textContent = key;
+      const d = el('span', 'help-desc', r); d.textContent = desc;
+    }
+    const foot = el('div', 'help-foot', p);
+    foot.textContent = 'Ronde ganjil SOLARA menyerang (kamu bawa bom) · ronde genap BASTION menyerang (kamu defuse).';
+    const close = el('button', 'help-close', p);
+    close.textContent = 'CLOSE  [H]';
+    close.addEventListener('click', () => this.onCloseHelp && this.onCloseHelp());
+    this.onCloseHelp = null; // wired by main.js
+  }
+  setHelpOpen(open) {
+    this.helpOpen = open;
+    this.helpPanel.classList.toggle('hidden', !open);
   }
   _refreshSettingsPanel() {
     for (const sync of this._settingsSyncs || []) sync();
@@ -360,19 +464,38 @@ export class HUD {
       old.el.remove();
     }
   }
-  showEnd(winner, score, bots) {
+  // v3.13 (item 4): end-of-match scoreboard. VICTORY/DEFEAT, team scores,
+  // and a per-team table (K / A / D / HS% / DMG / CASH) built from the
+  // REAL match stats sim.js tracked all match (never invented numbers).
+  // NOTE (bug found while building this): in real play the end overlay
+  // NEVER appeared — sim.endMatch() pushed a 'matchEnd' event that no HUD
+  // code handled, so only the ?shot=end staging ever showed it. update()
+  // now handles that event. "MAIN LAGI" soft-restarts via onPlayAgain
+  // (main.js); R still does a full page reload.
+  showEnd() {
+    const s = this.sim;
+    const winner = s.score.solara > s.score.bastion ? 'solara' : 'bastion';
+    const youWin = winner === 'solara';
+    const rows = (team) => [...s.stats.values()]
+      .filter((r) => r.team === team)
+      .sort((a, b) => b.kills - a.kills || b.damage - a.damage)
+      .map((r) => {
+        const hs = r.kills > 0 ? `${Math.round((r.hsKills / r.kills) * 100)}%` : '—';
+        return `<tr><td class="sb-name">${r.name}</td><td>${r.kills}</td><td>${r.assists}</td><td>${r.deaths}</td><td>${hs}</td><td>${r.damage}</td><td>$${r.earned}</td></tr>`;
+      }).join('');
+    const table = (team, label, cls) => `<div class="sb-team ${cls}"><h3>${label}</h3><table class="sb-table"><tr><th>PLAYER</th><th>K</th><th>A</th><th>D</th><th>HS%</th><th>DMG</th><th>CASH</th></tr>${rows(team) || '<tr><td colspan="7">No stats recorded</td></tr>'}</table></div>`;
     this.endOverlay.classList.remove('hidden');
-    let roster = '';
-    if (bots) {
-      const team = bots.filter((b) => b.team === winner);
-      roster = team.map((b) => `${b.name} (${b.role})`).join(' · ');
-      if (winner === 'solara') roster = `You · ${roster}`;
-    }
-    this.endOverlay.innerHTML = `<h1>${winner === 'solara' ? 'SOLARA WINS' : 'BASTION WINS'}</h1>
-      <p class="sub">Final score ${score.solara} — ${score.bastion}</p>
-      ${roster ? `<p class="roster">${roster}</p>` : ''}
+    this.endOverlay.innerHTML = `<h1 class="${youWin ? 'sb-win' : 'sb-lose'}">${youWin ? '★ VICTORY ★' : 'DEFEAT'}</h1>
+      <p class="sub">Final score — SOLARA ${s.score.solara} · ${s.score.bastion} BASTION</p>
+      <div class="sb-tables">${table('solara', 'SOLARA', 'sb-sol')}${table('bastion', 'BASTION', 'sb-bas')}</div>
+      <p class="roster">Cash = earned this match (kill $300 · plant $300 · round bonus)</p>
+      <button class="sb-again" id="sb-again">▶ MAIN LAGI</button>
       <p class="cta">Press R to play again</p>`;
+    this.endOpen = true; // v3.13: keeps the pause overlay off the scoreboard
+    const btn = this.endOverlay.querySelector('#sb-again');
+    if (btn) btn.addEventListener('click', () => this.onPlayAgain && this.onPlayAgain());
   }
+  hideEnd() { this.endOverlay.classList.add('hidden'); this.endOpen = false; }
   hideStart() { this.startOverlay.classList.add('hidden'); }
 
   drawMinimap(bots) {
@@ -448,7 +571,7 @@ export class HUD {
   // only cached once the game loop has run at least one update.
   _refreshSquad() {
     if (!this._bots) return;
-    const mates = [{ name: 'YOU', role: this.player.hasBomb ? 'Carrier' : 'Entry', weapon: this.player.weapon.def.name, money: this.player.money }];
+    const mates = [{ name: 'YOU', role: this.player.hasBomb ? 'Carrier' : (this.sim.attackTeam === 'solara' ? 'Entry' : 'Defender'), weapon: this.player.weapon.def.name, money: this.player.money }];
     for (const b of this._bots) {
       if (b.team !== 'solara') continue;
       mates.push({ name: b.name, role: b.role, weapon: WEAPONS[b.weapon] ? WEAPONS[b.weapon].name : b.weapon });
@@ -467,6 +590,7 @@ export class HUD {
       if (e.type === 'hitmarker') this.showHitmarker(e.headshot);
       if (e.type === 'radio') this.pushChat(e.text, e.team);
       if (e.type === 'status') this.showStatus(e.text, e.dur || 1.5); // v3.10
+      if (e.type === 'matchEnd') this.showEnd(); // v3.13 (item 4): the end overlay never showed in real play
       if (e.type === 'flash' && e.strength > 0) {
         this.flashFx.style.opacity = String(Math.min(1, e.strength));
         setTimeout(() => { this.flashFx.style.opacity = '0'; }, 100);
@@ -512,7 +636,43 @@ export class HUD {
       ? `💣 BOMB PLANTED — SITE ${s.bombSite}`
       : s.bombDropped
         ? '💣 BOMB DROPPED — RECOVER IT'
-        : p.hasBomb ? '💣 YOU CARRY THE BOMB' : (this.botsCarrier(bots) ? '💣 ALLY CARRIES THE BOMB' : '');
+        : p.hasBomb ? '💣 YOU CARRY THE BOMB — PLANT AT A / B'
+        : (() => { const c = bots.find((b) => b.alive && b.isCarrier); return c ? `💣 ${c.name.toUpperCase()} CARRIES THE BOMB` : (s.attackTeam === 'bastion' ? '💣 BASTION ATTACKS — DEFEND THE SITES' : ''); })();
+    // v3.13 (item 8): difficulty tag (cached write) + start-screen line.
+    const dLabel = `KESULITAN: ${(DIFFICULTY[settings.difficulty] || DIFFICULTY.normal).label}`;
+    if (this._diffLabel !== dLabel) {
+      this._diffLabel = dLabel;
+      this.diffTag.textContent = dLabel;
+      if (this.startDiff) this.startDiff.textContent = (DIFFICULTY[settings.difficulty] || DIFFICULTY.normal).label;
+    }
+    // v3.13 (item 1): unmissable plant/defuse prompt. The channel bar
+    // only appears once progress starts; this tells the player WHAT to do
+    // and WHERE, before they ever press E.
+    const inSite = (() => {
+      for (const key of ['A', 'B']) {
+        const c = s.map.sites[key].center;
+        if (Math.hypot(p.pos.x - c.x, p.pos.z - c.z) < s.map.sites[key].r) return key;
+      }
+      return null;
+    })();
+    let prompt = '';
+    if (s.phase === 'round' && p.alive) {
+      if (!s.bombPlanted && p.hasBomb) {
+        prompt = inSite ? `TAHAN [E] UNTUK PASANG BOM — SITE ${inSite}` : 'Bawa bom ke SITE A / B — tahan [E] untuk pasang';
+      } else if (s.bombPlanted && s.attackTeam === 'bastion' && s.bombPos
+        && Math.hypot(p.pos.x - s.bombPos.x, p.pos.z - s.bombPos.z) < 2.5) {
+        prompt = p.hasKit ? 'TAHAN [E] UNTUK DEFUSE BOM (KIT — 2,5 dtk)' : 'TAHAN [E] UNTUK DEFUSE BOM';
+      } else if (s.bombPlanted && s.attackTeam === 'bastion') {
+        prompt = `BOM TERPASANG DI SITE ${s.bombSite} — dekati dan tahan [E] untuk defuse`;
+      }
+    } else if (s.phase === 'freeze' && p.hasBomb) {
+      prompt = 'Ronde mulai — bawa bom ke SITE A / B, tahan [E] untuk pasang';
+    }
+    if (prompt) {
+      this.plantPrompt.textContent = prompt;
+      this.plantPrompt.classList.remove('hidden');
+      this.plantPrompt.classList.toggle('plantprompt-big', prompt.startsWith('TAHAN'));
+    } else this.plantPrompt.classList.add('hidden');
     // Banner (hidden while the buy menu is open).
     if (s.bannerT > 0 && s.banner !== this._lastBanner) {
       this.banner.textContent = s.banner;
@@ -602,8 +762,5 @@ export class HUD {
     this.cross.style.setProperty('--sp', `${Math.min(26, spread)}px`);
     this.cross.classList.toggle('ads', !!p.adsHeld);
     this.drawMinimap(bots);
-  }
-  botsCarrier(bots) {
-    return bots.some((b) => b.alive && b.team === 'solara' && b.isCarrier);
   }
 }

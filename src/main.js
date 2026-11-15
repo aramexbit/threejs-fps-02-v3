@@ -82,10 +82,12 @@ let started = false;
 const input = new Input(canvas, (locked) => {
   if (SHOT) return;
   if (locked) hud.setPauseOpen(false);
-  else if (started && !hud.buyOpen && !hud.settingsOpen) hud.setPauseOpen(true);
+  else if (started && !hud.buyOpen && !hud.settingsOpen && !hud.helpOpen && !hud.endOpen) hud.setPauseOpen(true);
   // v3.10: the gear button is a trap while locked (clicks go to the canvas
-  // and fire the weapon) — hide it whenever the lock is held.
+  // and fire the weapon) — hide it whenever the lock is held. Same for the
+  // help button (v3.13).
   hud.setGearVisible(!locked);
+  hud.setHelpVisible(!locked);
 });
 input.shotMode = !!SHOT;
 const player = new Player(scene, camera, map, audio, fx);
@@ -95,7 +97,7 @@ const BASTION_NAMES = ['Frost', 'Glacier', 'Hail', 'Sleet', 'Storm'];
 for (const n of SOLARA_NAMES) bots.push(new Bot(scene, map, 'solara', n, mulberry32(SEED + n.length * 13)));
 for (const n of BASTION_NAMES) bots.push(new Bot(scene, map, 'bastion', n, mulberry32(SEED + n.length * 29)));
 const sim = new Sim(map, player, bots, fx, audio, rng);
-sim.startRound();
+sim.startMatch(); // v3.13: full match reset (scores, stats, economy, attack)
 
 // Bomb mesh: a dark case with a blinking red light, shown while planted.
 const bombMesh = new THREE.Group();
@@ -136,6 +138,30 @@ function closeSettings() {
 hud.onOpenSettings = openSettings;
 hud.onCloseSettings = closeSettings;
 hud.onResume = () => { hud.setPauseOpen(false); input.requestLock(); };
+// v3.13 (item 5): help panel — same G1 lock pattern as the buy menu and
+// settings: open releases the lock (the panel is clickable), close re-locks.
+function openHelp() {
+  hud.setPauseOpen(false);
+  hud.setHelpOpen(true);
+  input.clearPressed();
+  input.exitLock();
+}
+function closeHelp() {
+  hud.setHelpOpen(false);
+  // Re-lock only if nothing else needs a free mouse (buy menu, settings,
+  // or the end-of-match scoreboard with its MAIN LAGI button).
+  if (!hud.buyOpen && !hud.settingsOpen && !hud.endOpen) input.requestLock();
+}
+hud.onOpenHelp = openHelp;
+hud.onCloseHelp = closeHelp;
+// v3.13 (item 4): MAIN LAGI — soft-restart the match (no page reload):
+// scores/stats/economy reset, round 1, Solara attacks again.
+hud.onPlayAgain = () => {
+  hud.hideEnd();
+  hud.setPauseOpen(false);
+  sim.startMatch();
+  input.requestLock();
+};
 function applyQuality() {
   const q = QUALITY[settings.quality];
   renderer.setPixelRatio(Math.min(devicePixelRatio, q.pixelRatio));
@@ -269,14 +295,25 @@ function setupShot() {
     sim.plantProgress = 2.2;
     sim.debugPlantHold = true;
   } else if (SHOT === 'end') {
-    // Victory screen: match won 5–3, end overlay with the Solara roster.
-    // Hero angle: from mid-south looking east-southeast at the red lattice
-    // crane + boiler house, instead of a dark empty corner.
+    // Victory screen: match won 5–3, end overlay with the REAL scoreboard
+    // tables. Stats are seeded through the same _addKill/_addDamage paths
+    // the live game uses (shot staging only), plus the round bonuses
+    // endRound() pays — so the shot shows what a real 5–3 match produces.
     sim.score = { solara: 5, bastion: 3 };
     sim.round = 9;
     sim.phase = 'matchEnd';
     sim.setBanner('SOLARA TAKES THE MATCH', 8);
-    hud.showEnd('solara', sim.score, bots);
+    const sol = bots.filter((b) => b.team === 'solara');
+    const bas = bots.filter((b) => b.team === 'bastion');
+    const kill = (k, v, hs) => { sim._addDamage(k, v, 95); sim._addKill(k, v, hs); };
+    kill(player, bas[0], true); kill(player, bas[1], false); kill(player, bas[2], true);
+    sim._addDamage(player, bas[3], 40);
+    sim._addKill(sol[0], bas[3], false); // assist for You (last damaged by You)
+    kill(sol[1], bas[4], false); kill(sol[2], bas[0], false);
+    kill(bas[0], sol[0], false); kill(bas[1], sol[1], false); kill(bas[2], player, false);
+    sim._addDamage(player, bas[4], 120);
+    for (const r of sim.stats.values()) r.earned += (r.team === 'solara' ? 5 : 3) * 3250;
+    hud.showEnd();
     if (player.viewmodel) player.viewmodel.visible = false; // cinematic: no gun in frame
     player.pos.set(0, 0, 6);
     player.yaw = -Math.PI / 2 - 0.35;
@@ -349,6 +386,27 @@ function frame(now) {
   // deliver the Escape keydown; when locked Esc exits the lock instead and
   // the pause overlay appears via onLockChange).
   if (!SHOT && hud.settingsOpen && input.consume('Escape')) closeSettings();
+  // v3.13 (item 5): H toggles the help panel. Opening releases the lock
+  // (the panel is clickable); closing re-locks — unless the buy menu or
+  // settings are open, which keep the mouse free themselves.
+  if (!SHOT && started && input.consume('KeyH')) {
+    if (hud.helpOpen) closeHelp();
+    else openHelp();
+  }
+  // v3.13 (item 6): number keys buy while the shop is open.
+  if (!SHOT && hud.buyOpen && sim.phase === 'freeze') {
+    for (const code of ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0']) {
+      if (input.consume(code)) hud.buyByKey(code);
+    }
+  }
+  // v3.13 (item 6): Esc closes the buy menu; (item 5) Esc closes help.
+  // Both run while unlocked, so the browser delivers the keydown. Help is
+  // on top when both are open, so Esc closes help first.
+  if (!SHOT && hud.buyOpen && !hud.helpOpen && input.consume('Escape')) {
+    hud.setBuyOpen(false);
+    input.requestLock();
+  }
+  if (!SHOT && hud.helpOpen && input.consume('Escape')) closeHelp();
   // Buy menu toggle (freeze only).
   // v3.9: check the phase BEFORE consuming the key. The old order called
   // consume('KeyB') first, so a B press outside freeze was silently eaten.
@@ -417,6 +475,11 @@ function frame(now) {
     renderer.render(scene, camera);
   }
   hud.update(dt, bots, sim.events);
+  // v3.13 (item 4): the end overlay has a clickable MAIN LAGI button, so
+  // the mouse must be free when the match ends. exitLock is a no-op when
+  // already unlocked; endOpen (set by showEnd, just above) keeps the pause
+  // overlay from opening on the lock change.
+  if (!SHOT && sim.phase === 'matchEnd' && input.locked) input.exitLock();
   frames++;
   window.__frames = frames;
   // v3.7 fix: the pine (2.2 MB, 2x1024^2 PNGs) loads at frame 40 — long

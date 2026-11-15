@@ -10,7 +10,20 @@ export const DEFAULT_SETTINGS = {
   fov: 74, // base field of view, 60–100 (ADS stays 58)
   invertY: false,
   quality: 'high', // 'low' | 'high' — perf budgets, see QUALITY
+  difficulty: 'normal', // v3.13: 'easy' | 'normal' | 'hard' — bot skill, see DIFFICULTY
 };
+
+// v3.13: difficulty levels. Bots read the multipliers at spawn (see
+// bots.js spawnAt) so a change applies from the next round on.
+// easy: bots miss more, react slower, hit softer, die faster.
+// normal: the v3.12 baseline (accuracy 0.55, reaction 0.25–0.6 s).
+// hard: sharper aim, faster reactions, harder hits, tougher bodies.
+export const DIFFICULTY = {
+  easy: { label: 'MUDAH', accMult: 0.7, reactMult: 1.6, dmgMult: 0.7, hp: 80 },
+  normal: { label: 'NORMAL', accMult: 1.0, reactMult: 1.0, dmgMult: 1.0, hp: 100 },
+  hard: { label: 'SULIT', accMult: 1.3, reactMult: 0.65, dmgMult: 1.3, hp: 120 },
+};
+export const DIFFICULTY_IDS = ['easy', 'normal', 'hard'];
 
 // Perf budgets per quality tier. Low halves the pixel ratio, turns the sun
 // shadow map off, and cuts particle/snow counts — the three biggest costs
@@ -37,6 +50,7 @@ export function loadSettings() {
     s.fov = clamp(+s.fov || 74, 60, 100);
     s.invertY = !!s.invertY;
     s.quality = s.quality === 'low' ? 'low' : 'high';
+    s.difficulty = DIFFICULTY[s.difficulty] ? s.difficulty : 'normal';
     return s;
   } catch {
     return { ...DEFAULT_SETTINGS };

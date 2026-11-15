@@ -13,12 +13,21 @@ import {
 
 export const MAP = { w: 44, h: 36, halfW: 22, halfH: 18 };
 export const SITES = {
-  A: { name: 'Foundry', center: { x: 15, z: -12 }, r: 5 },
-  B: { name: 'Crane Yard', center: { x: 15, z: 12 }, r: 5 },
+  A: { name: 'Foundry', center: { x: 15, z: -12 }, r: 6.5 },
+  B: { name: 'Crane Yard', center: { x: 15, z: 12 }, r: 6.5 },
 };
 export const SPAWNS = {
   solara: [{ x: -20, z: -4 }, { x: -20, z: 0 }, { x: -20, z: 4 }, { x: -18, z: -7 }, { x: -18, z: 7 }],
-  bastion: [{ x: 20, z: -14 }, { x: 20, z: -10 }, { x: 20, z: 10 }, { x: 20, z: 14 }, { x: 18, z: 0 }],
+  // v3.13 fix: (20,14) sat INSIDE the boiler block collider, so the bot
+  // spawned there could never move (proven 16 Nov: the Bastion carrier
+  // Hail spawned there and stayed put for a whole round). (13,16) is clear
+  // ground just west of the block, still on the Bastion side of site B.
+  // v3.13 fix 2: (20,-14) and (20,-10) sat INSIDE the foundry east wall
+  // collider (x 20.2..21.0) — the spawnAt safety net handled them, but
+  // clear spawns are better than relying on the net. (19.5,-14) then
+  // landed inside the foundry furnace collider (x 17.1..19.3, z -15.4..-13.8),
+  // so the first spawn is (19.5,-13) instead — clear of both.
+  bastion: [{ x: 19.5, z: -13 }, { x: 19.5, z: -10 }, { x: 20, z: 10 }, { x: 13, z: 16 }, { x: 18, z: 0 }],
 };
 
 function std(params) { return new THREE.MeshStandardMaterial(params); }
@@ -134,12 +143,15 @@ export function buildMap(scene) {
 
   // --- Site A: the Foundry (concrete U, open west) ----------------------------
   const foundry = (cx, cz) => {
-    group.add(boxAt(concMat, 9, 4.5, 0.8, cx, 2.25, cz - 4.6)); // north wall
-    group.add(boxAt(concMat, 9, 4.5, 0.8, cx, 2.25, cz + 4.6)); // south wall
-    group.add(boxAt(concMat, 0.8, 4.5, 10, cx + 4.6, 2.25, cz)); // east wall
-    addCollider(cx, cz - 4.6, 4.5, 0.4, 4.5);
-    addCollider(cx, cz + 4.6, 4.5, 0.4, 4.5);
-    addCollider(cx + 4.6, cz, 0.4, 5, 4.5);
+    // v3.13 (item 9): the Foundry is a bomb SITE now, so it is wider —
+    // walls at ±5.6 instead of ±4.6 and the east wall out at +5.6, leaving
+    // real room to move, fight and plant around the furnace.
+    group.add(boxAt(concMat, 11, 4.5, 0.8, cx, 2.25, cz - 5.6)); // north wall
+    group.add(boxAt(concMat, 11, 4.5, 0.8, cx, 2.25, cz + 5.6)); // south wall
+    group.add(boxAt(concMat, 0.8, 4.5, 12, cx + 5.6, 2.25, cz)); // east wall
+    addCollider(cx, cz - 5.6, 5.5, 0.4, 4.5);
+    addCollider(cx, cz + 5.6, 5.5, 0.4, 4.5);
+    addCollider(cx + 5.6, cz, 0.4, 6, 4.5);
     // Furnace: dark box with a glowing orange mouth (fire spot).
     const furnace = boxAt(darkSteel, 2.2, 2.6, 1.6, cx + 3.2, 1.3, cz - 2.6);
     group.add(furnace);
@@ -152,14 +164,14 @@ export function buildMap(scene) {
     group.add(mouth);
     addCollider(cx + 3.2, cz - 2.6, 1.1, 0.8, 2.6);
     // Pipes along the north wall.
-    group.add(cylAt(steelMat, 0.22, 0.22, 8.4, cx, 3.6, cz - 4.1, 10));
+    group.add(cylAt(steelMat, 0.22, 0.22, 10.4, cx, 3.6, cz - 5.1, 10));
     const pipe = group.children[group.children.length - 1];
     pipe.rotation.z = Math.PI / 2;
     // Destruction detail (Gemini realism pass): rubble chunks + exposed rebar
     // scattered around the foundry, like the shattered concrete in the reference.
     const rRnd = mulberry32(444);
     for (let i = 0; i < 8; i++) {
-      const rx = cx + (rRnd() - 0.5) * 10, rz = cz + (rRnd() - 0.5) * 10;
+      const rx = cx + (rRnd() - 0.5) * 9, rz = cz + (rRnd() - 0.5) * 9;
       const chunk = new THREE.Mesh(new THREE.DodecahedronGeometry(0.1 + rRnd() * 0.2, 0), concMat);
       chunk.position.set(rx, 0.1, rz);
       chunk.rotation.set(rRnd() * Math.PI, rRnd() * Math.PI, rRnd() * Math.PI);
@@ -176,13 +188,16 @@ export function buildMap(scene) {
 
   // --- Site B: Boiler House + the red lattice crane ---------------------------
   const boiler = (cx, cz) => {
-    group.add(boxAt(concMat, 6, 4, 5, cx + 3.5, 2, cz + 2)); // boiler block
-    addCollider(cx + 3.5, cz + 2, 3, 2.5, 4);
-    group.add(cylAt(steelMat, 1.1, 1.1, 3.4, cx + 1, 1.7, cz - 1.5, 16)); // water tank
-    addCollider(cx + 1, cz - 1.5, 1.1, 1.1, 3.4);
-    const chimney = cylAt(darkSteel, 0.45, 0.6, 7, cx + 5.5, 3.5, cz + 4, 12);
+    // v3.13 (item 9): the boiler block slides south-east so the site centre
+    // opens up; the tank and chimney move with it. Waypoints (15,8), (17,12)
+    // and (19,12) all stay clear of the new colliders.
+    group.add(boxAt(concMat, 6, 4, 5, cx + 4.5, 2, cz + 3)); // boiler block
+    addCollider(cx + 4.5, cz + 3, 3, 2.5, 4);
+    group.add(cylAt(steelMat, 1.1, 1.1, 3.4, cx + 2, 1.7, cz - 3.5, 16)); // water tank
+    addCollider(cx + 2, cz - 3.5, 1.1, 1.1, 3.4);
+    const chimney = cylAt(darkSteel, 0.45, 0.6, 7, cx + 6, 3.5, cz + 5.5, 12);
     group.add(chimney);
-    addCollider(cx + 5.5, cz + 4, 0.6, 0.6, 7);
+    addCollider(cx + 6, cz + 5.5, 0.6, 0.6, 7);
   };
   boiler(SITES.B.center.x, SITES.B.center.z);
 
@@ -515,8 +530,8 @@ export function buildMap(scene) {
     roof.castShadow = true; roof.receiveShadow = true;
     group.add(roof);
   };
-  prismRoof(15, 4.5, -12, 9.6, 2.4, 9.4); // foundry
-  prismRoof(18.5, 4, 14, 5.4, 1.8, 6.4); // boiler house
+  prismRoof(15.2, 4.5, -12, 11.6, 2.4, 11.6); // foundry (v3.13: wider room)
+  prismRoof(19.5, 4, 15, 5.4, 1.8, 6.4); // boiler house (v3.13: moved block)
 
   // Barrel clusters pressed against container faces (colliders hug the
   // existing container colliders — link-checked, no lane cut).
@@ -633,11 +648,27 @@ export function buildMap(scene) {
   scene.add(group);
 
   // --- Waypoints: lanes + site approaches -----------------------------------------
+  // v3.13 fix (16 Nov, Node audit): 5 waypoints sat INSIDE colliders, so no
+  // bot could ever stand on them and BFS routes through them were dead.
+  // [-12,0] was on the sandbag wall -> [-12,-2] (south of the sandbags; the
+  // [-12,2] detour landed inside the (-14,2) container). [8,-12] was inside
+  // the (6,-13) container -> [8,-9] (north of it AND north of the (5,-11.4)
+  // barrel that blocks the (2,-12)->(8,-10) line). [8,12] was inside the
+  // (8,10) container -> [8,14] (south side). [0,6] was on the bonfire
+  // woodpile -> [2,6]. [12,-6] was on the foundry east wall -> [12,-4]
+  // (mid side; the wall has no gap there, so no north/mid junction).
+  // [-4,-12] -> [-4,-15]: the (-6,-12) sandbag wall sits across the north
+  // lane between (-10,-12) and (-4,-12); the lane jogs north around it.
+  // REVERTED (16 Nov): (-4,-15) sits 0.05 m from a crate at (-4,-14) and
+  // its (-4,-15)->(2,-12) line is blocked by a tree at (-2,-14). The
+  // original (-4,-12) is a valid node (links to (2,-12) and (0,-6)); the
+  // west/east north-lane join is done by the new bridge node (-2,-10)
+  // below, which links (-10,-12), (2,-12) and (0,-6).
   const pts = [
-    [-20, 0], [-16, 0], [-12, 0], [-8, 0], [-4, 0], [0, 0], [4, 0], [8, 0], [12, 0], [16, 0], [20, 0],
-    [-16, -12], [-10, -12], [-4, -12], [2, -12], [8, -12], [13, -12], [17, -12],
-    [-16, 12], [-10, 12], [-4, 12], [2, 12], [8, 12], [13, 12], [17, 12],
-    [-12, -6], [-12, 6], [0, -6], [0, 6], [12, -6], [12, 6],
+    [-20, 0], [-16, 0], [-12, -2], [-8, 0], [-4, 0], [0, 0], [4, 0], [8, 0], [12, 0], [16, 0], [20, 0],
+    [-16, -12], [-10, -12], [-4, -12], [2, -12], [8, -9], [13, -12], [17, -12],
+    [-16, 12], [-10, 12], [-4, 12], [2, 12], [8, 14], [13, 12], [17, 12],
+    [-12, -6], [-12, 6], [0, -6], [2, 6], [12, -4], [12, 6], [-2, -10],
     [15, -8], [15, 8], [19, -12], [19, 12],
   ];
   const waypoints = pts.map(([x, z]) => ({ x, z, links: [] }));
@@ -675,7 +706,7 @@ export function buildMap(scene) {
       { pos: new THREE.Vector3(3.62, 0.9, -6.3), kind: 'barrel' },
       { pos: new THREE.Vector3(6, 0.9, -11.38), kind: 'barrel' },
       { pos: new THREE.Vector3(8, 0.9, 7.0), kind: 'barrel' },
-      { pos: new THREE.Vector3(20.5, 7, 16), kind: 'chimney' },
+      { pos: new THREE.Vector3(21, 7, 17.5), kind: 'chimney' }, // v3.13: follows the moved chimney
       { pos: new THREE.Vector3(15, 4.5, -12), kind: 'chimney' }, // v3.2: smoke column over the foundry
     ],
   };

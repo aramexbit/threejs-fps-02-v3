@@ -4,7 +4,7 @@
 // here; main.js steps sim at a fixed 60 Hz and reads the results. Bots and
 // the player only ever touch the world through this module's callbacks.
 import * as THREE from 'three';
-import { WEAPONS } from './weapons.js';
+import { WEAPONS, Weapon } from './weapons.js';
 import { rayAABB, raySphere } from './player.js';
 
 export const FREEZE_TIME = 15;
@@ -41,24 +41,96 @@ export class Sim {
     this.radioPerBot = new Map(); // bot name -> last line time
     this.defuseTime = 5; // 2.5 s with a defuse kit
     this.debugPlantHold = false; // shot mode: pretend E is held for the plant shot
+    // v3.13: attack/defence ALTERNATES by round. Odd rounds Solara attacks
+    // (the player carries the bomb and plants — item 1); even rounds
+    // Bastion attacks (a Bastion bot carries and plants, the player +
+    // Solara bots defend and defuse — item 7). One bomb, one direction per
+    // round; the role swap is the only design that satisfies both items.
+    this.attackTeam = 'solara'; // team attacking THIS round
+    this.plantTeam = null; // team that planted the bomb this round (null until planted)
+    this.stats = new Map(); // v3.13 match stats: entity -> {name, team, kills, deaths, assists, hsKills, damage, earned}
+    this.botGrenades = []; // v3.13: bot-thrown HE grenades {pos, vel, fuse, team, thrower}
+  }
+  // --- Match stats (v3.13, item 4) ---------------------------------------------
+  // Real numbers only: damage/kills/assists are recorded at the exact
+  // places the game already resolves them. Assists credit the teammate who
+  // last damaged the victim within 5 s (and is not the killer).
+  _stat(ent) {
+    let row = this.stats.get(ent);
+    if (!row) {
+      const isPlayer = ent === this.player;
+      row = {
+        name: isPlayer ? 'You' : ent.name, team: isPlayer ? 'solara' : ent.team,
+        kills: 0, deaths: 0, assists: 0, hsKills: 0, damage: 0, earned: 0,
+      };
+      this.stats.set(ent, row);
+    }
+    return row;
+  }
+  _addDamage(att, vic, dmg) {
+    if (!att || !vic || dmg <= 0) return;
+    this._stat(att).damage += dmg;
+    vic.lastHitBy = att;
+    vic.lastHitT = this.time;
+  }
+  _addKill(killer, victim, headshot = false) {
+    if (!killer || !victim) return;
+    const k = this._stat(killer);
+    k.kills++;
+    if (headshot) k.hsKills++;
+    k.earned += 300;
+    this._stat(victim).deaths++;
+    const helper = victim.lastHitBy;
+    if (helper && helper !== killer && this.time - (victim.lastHitT ?? -99) < 5) {
+      const hk = helper === this.player ? 'solara' : helper.team;
+      const kk = killer === this.player ? 'solara' : killer.team;
+      if (hk === kk) this._stat(helper).assists++;
+    }
+    victim.lastHitBy = null;
+  }
+  resetMatchStats() { this.stats.clear(); }
+  // v3.13: full match reset (MAIN LAGI / play again). Economy + loadout
+  // reset to the round-1 state, scores and stats cleared, attack back to
+  // Solara. Called by main.js; startRound() does the per-round respawn.
+  startMatch() {
+    this.score = { solara: 0, bastion: 0 };
+    this.round = 1;
+    this.attackTeam = 'solara';
+    this.lossStreak = 0;
+    this.resetMatchStats();
+    const p = this.player;
+    p.money = 800;
+    p.armor = 0; p.hasKit = false;
+    p.grenades = { he: 0, smoke: 0, flash: 0 };
+    p.grenadeType = 'he';
+    p.slots = [new Weapon(WEAPONS.p9)];
+    p.slot = 0;
+    p.throwAnim = null;
+    p.equip(0);
+    this.startRound();
   }
   get aliveBots() { return this.bots.filter((b) => b.alive); }
   teamAlive(team) {
     if (team === 'solara') return (this.player.alive ? 1 : 0) + this.bots.filter((b) => b.alive && b.team === 'solara').length;
     return this.bots.filter((b) => b.alive && b.team === 'bastion').length;
   }
-  siteClear(site) {
+  // v3.13: a site is clear for the CARRIER's team when no living DEFENDER
+  // (the opposite team) is within 7 m of the site centre. The old
+  // player-proximity clause ("bot waits while the player is < 9 m away")
+  // is gone: in a Bastion-attack round the player IS the defender camping
+  // the site, and that clause would make the Bastion carrier wait forever.
+  // The carrier still has to stand in the open for 3 s to channel, and
+  // every hit halves its progress — camping the site still stops a plant.
+  siteClear(site, team) {
     if (!this.map.sites[site]) return false;
     const c = this.map.sites[site].center;
+    const defenders = team === 'solara' ? 'bastion' : 'solara';
     for (const b of this.bots) {
-      if (!b.alive || b.team !== 'bastion') continue;
+      if (!b.alive || b.team !== defenders) continue;
       if (Math.hypot(b.pos.x - c.x, b.pos.z - c.z) < 7) return false;
     }
-    // v3.9 (Gemini G2): the old code had an empty if-block here — player
-    // proximity never blocked the bot plant. The carrier bot only plants
-    // when the player is far from the site; when the player is close
-    // (< 9 m) the player plants with E themselves, so the bot waits.
-    if (this.player.alive && this.player.pos.distanceTo(new THREE.Vector3(c.x, 0, c.z)) < 9) return false;
+    if (defenders === 'solara' && this.player.alive
+      && this.player.pos.distanceTo(new THREE.Vector3(c.x, 0, c.z)) < 7) return false;
     return true;
   }
 
@@ -69,49 +141,73 @@ export class Sim {
     this.bombPlanted = false;
     this.bombSite = null;
     this.bombPos = null;
+    this.plantTeam = null;
     this.plantProgress = 0;
     this.defuseProgress = 0;
     this.bombDropped = null; // v3.10: a dropped bomb never survives the round
+    this.botGrenades = [];
     // Respawn everyone.
     const p = this.player;
     p.pos.set(this.map.spawns.solara[0].x, 0, this.map.spawns.solara[0].z);
     p.yaw = -Math.PI / 2; p.pitch = 0;
     p.hp = 100; p.alive = true; p.armor = p.armor; // armor carries over
     for (const w of p.slots) { w.ammo = w.def.mag; w.reserve = w.def.reserve; w.reloading = 0; }
-    p.hasBomb = true;
+    // v3.13: the bomb belongs to the ATTACKING team this round. Solara
+    // attacks: the player carries it (item 1). Bastion attacks: a Bastion
+    // bot carries it (item 7a) — designated HERE, every attack round, so
+    // the plant path actually has a carrier (the old code never designated
+    // a bot carrier at all, which is why bot planting never happened).
+    p.hasBomb = this.attackTeam === 'solara';
     // Utility counts + armor + defuse kit carry across rounds.
     this.bombCarrier = null;
-    // Bots: 4 Solara friends + 5 Bastion. Sites: A 40% / mid 25% / B 35%.
+    // Bots: 4 Solara friends + 5 Bastion. Attackers push a site
+    // (A 40% / mid 25% / B 35%); defenders hold (2 A, 2 B, 1 mid/roam).
     const solaraBots = this.bots.filter((b) => b.team === 'solara');
     const bastionBots = this.bots.filter((b) => b.team === 'bastion');
-    solaraBots.forEach((b, i) => {
-      const s = this.map.spawns.solara[(i + 1) % this.map.spawns.solara.length];
+    const atk = this.attackTeam === 'solara' ? solaraBots : bastionBots;
+    const def = this.attackTeam === 'solara' ? bastionBots : solaraBots;
+    atk.forEach((b, i) => {
+      const s = this.map.spawns[b.team][(i + 1) % this.map.spawns[b.team].length];
       b.spawnAt(s.x, s.z);
-      b.hp = 100; b.alive = true; b.mesh.visible = true;
+      b.hp = b.hpMax; b.alive = true; b.mesh.visible = true;
       b.isCarrier = false; b.channel = 0; b.goal = null;
+      b.spawnIdx = i;
       const r = this.rng();
       b.assignSite(r < 0.4 ? 'A' : r < 0.65 ? 'mid' : 'B');
       if (b.site === 'mid') b.assignSite(this.rng() < 0.5 ? 'A' : 'B');
       b.wp = b.nearestWaypoint();
     });
     const defSites = ['A', 'A', 'B', 'B', 'mid'];
-    bastionBots.forEach((b, i) => {
-      const s = this.map.spawns.bastion[i % this.map.spawns.bastion.length];
+    def.forEach((b, i) => {
+      const s = this.map.spawns[b.team][i % this.map.spawns[b.team].length];
       b.spawnAt(s.x, s.z);
-      b.hp = 100; b.alive = true; b.mesh.visible = true;
+      b.hp = b.hpMax; b.alive = true; b.mesh.visible = true;
       b.isCarrier = false; b.channel = 0; b.goal = null;
+      b.spawnIdx = i;
       b.assignSite(defSites[i % defSites.length]);
       b.wp = b.nearestWaypoint();
     });
-    this.setBanner(`ROUND ${this.round} — ${this.round === 1 ? 'FROSTLINE' : 'BUY PHASE'}`, 3);
+    // v3.13: designate the Bastion carrier when Bastion attacks (item 7a).
+    // Prefer a Roamer (they rotate), else any living Bastion bot.
+    if (this.attackTeam === 'bastion') {
+      const carrier = bastionBots.find((b) => b.role === 'Roamer') || bastionBots[0];
+      if (carrier) {
+        carrier.isCarrier = true;
+        this.radio(carrier, `I have the bomb — pushing ${carrier.site}. Cover me!`, true);
+      }
+    }
+    const role = this.attackTeam === 'solara' ? 'ATTACK — PLANT THE BOMB' : 'DEFEND — STOP THE BOMB';
+    this.setBanner(`ROUND ${this.round} — ${this.round === 1 ? 'FROSTLINE' : role}`, 3);
     // Round-start plan callout from a Solara bot (throttle reset each round).
     this.radioT = -99; this.radioPerBot.clear();
     const caller = this.bots.find((b) => b.team === 'solara' && b.alive);
     if (caller) {
       const site = caller.site || 'A';
-      this.radio(caller, this.rng() < 0.5
-        ? `Pushing ${site} — follow me, watch the lanes.`
-        : `Rush ${site} together. ${site === 'A' ? 'Foundry' : 'Crane Yard'} — go go go.`, true);
+      this.radio(caller, this.attackTeam === 'solara'
+        ? (this.rng() < 0.5
+          ? `Pushing ${site} — follow me, watch the lanes.`
+          : `Rush ${site} together. ${site === 'A' ? 'Foundry' : 'Crane Yard'} — go go go.`)
+        : `Defend ${site} — they are coming to plant. Hold the site!`, true);
     }
   }
   // Radio callout: throttled (4 s global, 12 s per bot) unless forced.
@@ -134,16 +230,24 @@ export class Sim {
     this.timer = 4;
     this.score[winner]++;
     const p = this.player;
+    let bonus = 0;
     if (winner === 'solara') {
       p.money += 3250;
+      bonus = 3250;
       this.lossStreak = 0;
       this.setBanner(`SOLARA WINS THE ROUND — ${reason}`, 4);
     } else {
       const lossBonus = Math.min(2900, 1900 + this.lossStreak * 500);
       p.money += lossBonus;
+      bonus = lossBonus;
       this.lossStreak++;
       this.setBanner(`BASTION WINS THE ROUND — ${reason}`, 4);
     }
+    // v3.13: round bonus counts toward the scoreboard CASH column (earned
+    // this match) for the player AND every bot on that team, so the column
+    // is comparable across rows.
+    this._stat(p).earned += bonus;
+    for (const b of this.bots) if (b.team === winner) this._stat(b).earned += bonus;
     this.audio.roundWin();
     this.events.push({ type: 'roundEnd', winner, reason });
   }
@@ -166,7 +270,11 @@ export class Sim {
     // to itself and the ground-drop never happens (probe stage E caught
     // this: bombDropped stayed null). In the real death paths the carrier
     // is already dead (alive=false), so the filter is belt-and-braces.
-    const mates = this.bots.filter((b) => b.alive && b.team === 'solara' && b !== exclude);
+    // v3.13: the bomb belongs to the ATTACKING team — it transfers to the
+    // nearest living attacker bot, else the player (only when Solara
+    // attacks — the player is always Solara), else the ground, where only
+    // attackers can recover it.
+    const mates = this.bots.filter((b) => b.alive && b.team === this.attackTeam && b !== exclude);
     if (mates.length) {
       let best = mates[0], bd = Infinity;
       for (const b of mates) {
@@ -176,7 +284,7 @@ export class Sim {
       best.isCarrier = true;
       return;
     }
-    if (this.player.alive) {
+    if (this.attackTeam === 'solara' && this.player.alive) {
       this.player.hasBomb = true;
       return;
     }
@@ -193,9 +301,21 @@ export class Sim {
       if (site && held) {
         this.plantProgress += dt;
         if (Math.floor(this.plantProgress * 4) !== Math.floor((this.plantProgress - dt) * 4)) this.audio.beep();
-        if (this.plantProgress >= 3) this._plant(site);
-      } else this.plantProgress = 0;
+        if (this.plantProgress >= 3) this._plant(site, 'solara', true);
+      } else {
+        // v3.13 (item 1): a TAP on E inside a site used to do nothing at
+        // all — no sound, no text, progress 0 — so it read as "tombol bom
+        // tidak berfungsi". A tap now says what to do instead.
+        if (site && !held && this.plantProgress === 0 && input.consume('KeyE')) {
+          this.events.push({ type: 'status', text: 'TAHAN [E] 3 DETIK UNTUK PASANG BOM', dur: 2 });
+        }
+        this.plantProgress = 0;
+      }
     } else if (this.bombPlanted && this.bombPos) {
+      // v3.13: the player only defuses when their team is DEFENDING
+      // (Bastion-attack round). Defusing your own team's bomb used to be
+      // possible — and _defuse() awarded the round to Bastion for it.
+      if (this.attackTeam === 'solara') { this.defuseProgress = 0; return; }
       const d = Math.hypot(p.pos.x - this.bombPos.x, p.pos.z - this.bombPos.z);
       if (d < 2.5 && held) {
         this.defuseProgress += dt;
@@ -211,23 +331,31 @@ export class Sim {
     }
     return null;
   }
-  _plant(site) {
+  _plant(site, planterTeam = 'solara', byPlayer = false) {
     const c = this.map.sites[site].center;
     this.bombPlanted = true;
     this.bombSite = site;
     this.bombPos = new THREE.Vector3(c.x, 0.3, c.z);
     this.fuse = BOMB_FUSE;
-    this.player.hasBomb = false;
-    this.player.money += 300;
+    this.plantTeam = planterTeam;
+    if (byPlayer) {
+      this.player.hasBomb = false;
+      this.player.money += 300;
+      this._stat(this.player).earned += 300;
+    }
     this.audio.beep(true);
     this.events.push({ type: 'plant', site });
     this.setBanner('BOMB PLANTED — DEFEND THE SITE', 3);
   }
   _defuse() {
+    // v3.13: the round goes to the DEFENDING team — the opposite of
+    // whoever planted. The old code always awarded Bastion, so a player
+    // defusing (in a Bastion-attack round) LOST the round they just won.
     this.bombPlanted = false;
     this.audio.beep(true);
     this.events.push({ type: 'defuse' });
-    this.endRound('bastion', 'BOMB DEFUSED');
+    const defenders = this.plantTeam === 'solara' ? 'bastion' : 'solara';
+    this.endRound(defenders, 'BOMB DEFUSED');
   }
   _detonate() {
     this.bombPlanted = false;
@@ -235,18 +363,75 @@ export class Sim {
     this.audio.explosion();
     this.player.cameraShake = 1;
     this.events.push({ type: 'detonate' });
-    this.endRound('solara', 'BOMB DETONATED');
+    // v3.13: detonation wins the round for whoever PLANTED, not always Solara.
+    this.endRound(this.plantTeam || 'solara', 'BOMB DETONATED');
   }
   onBotPlant(bot) {
     if (this.bombPlanted || this.phase !== 'round' || !this.map.sites[bot.site]) return;
-    this._plant(bot.site);
+    this._plant(bot.site, bot.team, false);
+    this._stat(bot).earned += 300;
     this.radio(bot, `Bomb planted ${bot.site} — hold the site!`, true);
   }
   onBotDefuse(bot) {
     if (!this.bombPlanted) return;
     this.bombPlanted = false;
     this.radio(bot, `Bomb defused — site ${this.bombSite} clear.`, true);
-    this.endRound('bastion', 'BOMB DEFUSED');
+    // v3.13: a defusing bot wins the round for ITS OWN team (the defence).
+    this.endRound(bot.team, 'BOMB DEFUSED');
+  }
+  // v3.13: a bot HE grenade lands (see bots.js throw). Shared with the
+  // player's HE blast below: same radius/falloff, same stats, same fx.
+  onBotGrenade(bot, targetPos) {
+    const dir = new THREE.Vector3(targetPos.x - bot.pos.x, 0, targetPos.z - bot.pos.z);
+    const dist = Math.hypot(dir.x, dir.z);
+    if (dist > 1) { dir.x /= dist; dir.z /= dist; }
+    this.botGrenades.push({
+      pos: new THREE.Vector3(bot.pos.x, bot.eyeY - 0.2, bot.pos.z).addScaledVector(dir, 0.6),
+      vel: new THREE.Vector3(dir.x * 13, 5.5, dir.z * 13),
+      fuse: WEAPONS.he.fuse,
+      team: bot.team,
+      thrower: bot,
+    });
+  }
+  _explodeHE(pos, throwerTeam, thrower) {
+    this.fx.explosion.trigger(pos);
+    this.audio.explosion();
+    const R = WEAPONS.he.radius, DMG = WEAPONS.he.damage;
+    for (const b of this.bots) {
+      if (!b.alive || b.team === throwerTeam) continue;
+      const d = b.pos.distanceTo(pos);
+      if (d < R) {
+        const dmg = Math.round(DMG * (1 - d / R));
+        this._addDamage(thrower, b, dmg);
+        const died = b.takeDamage(dmg);
+        if (died) {
+          if (b.isCarrier) { b.isCarrier = false; this.dropBomb(b.pos, b); }
+          this._addKill(thrower, b, false);
+          this.events.push({ type: 'killfeed', killer: thrower === this.player ? 'You' : thrower.name, victim: b.name, weapon: 'HE', headshot: false });
+          if (thrower === this.player) { this.player.money += 300; this._onPlayerKill(false); }
+        }
+      }
+    }
+    const pd = this.player.pos.distanceTo(pos);
+    if (pd < R && this.player.alive) {
+      if (throwerTeam === 'bastion') {
+        const dmg = Math.round(DMG * (1 - pd / R) * 0.5);
+        this._addDamage(thrower, this.player, dmg);
+        const died = this.player.damage(dmg, 'torso');
+        if (died) {
+          this._addKill(thrower, this.player, false);
+          this.events.push({ type: 'killfeed', killer: thrower.name, victim: 'You', weapon: 'HE', headshot: false });
+          if (this.player.hasBomb) { this.player.hasBomb = false; this.dropBomb(this.player.pos, null); }
+          if (this.teamAlive('solara') === 0 && !this.bombPlanted) this.endRound('bastion', 'TEAM ELIMINATED');
+        }
+      } else if (thrower === this.player) {
+        // Own grenade: half self-damage, no stats, no kill credit.
+        this.player.damage(Math.round(DMG * (1 - pd / R) * 0.5), 'torso');
+      }
+    }
+    if (this.teamAlive('bastion') === 0 && !this.bombPlanted && this.phase === 'round') {
+      this.endRound('solara', 'TEAM ELIMINATED');
+    }
   }
 
   // --- Kill banners (v3.8 action pass) ------------------------------------------
@@ -302,6 +487,7 @@ export class Sim {
     if (best.kind === 'bot') {
       const mult = best.part === 'head' ? weapon.def.headMult : best.part === 'legs' ? 0.75 : 1;
       const dmg = Math.round(weapon.def.damage * mult);
+      this._addDamage(this.player, best.bot, dmg); // v3.13: match stats
       const killed = best.bot.takeDamage(dmg);
       this.audio.hit();
       // v3.9 (DeepSeek): the hitmarker never showed — push the event so
@@ -311,6 +497,7 @@ export class Sim {
       if (killed) {
         this.audio.kill();
         this.player.money += 300;
+        this._addKill(this.player, best.bot, best.part === 'head'); // v3.13
         this.events.push({
           type: 'killfeed', killer: 'You', victim: best.bot.name,
           weapon: weapon.def.name, headshot: best.part === 'head',
@@ -351,9 +538,11 @@ export class Sim {
       return;
     }
     if (enemy.isPlayer) {
+      this._addDamage(bot, this.player, bot.damage); // v3.13: match stats
       const died = this.player.damage(bot.damage, 'torso');
       this.events.push({ type: 'damage', amount: bot.damage });
       if (died) {
+        this._addKill(bot, this.player, false); // v3.13
         this.events.push({
           type: 'killfeed', killer: bot.name, victim: 'You',
           weapon: WEAPONS[bot.weapon].name, headshot: false,
@@ -369,8 +558,10 @@ export class Sim {
         }
       }
     } else if (enemy.bot) {
+      this._addDamage(bot, enemy.bot, bot.damage); // v3.13: match stats
       const died = enemy.bot.takeDamage(bot.damage);
       if (died) {
+        this._addKill(bot, enemy.bot, false); // v3.13
         // v3.10: a carrier bot killed by a bot shot drops/transfers the bomb.
         if (enemy.bot.isCarrier) {
           enemy.bot.isCarrier = false;
@@ -423,35 +614,13 @@ export class Sim {
         ? Math.min(1, 0.4 + facing * 0.6 * (1 - dist / (f.radius * 1.5))) : 0;
       this.events.push({ type: 'flash', strength });
     }
-    // Grenade blast damage (set by player._explodeGrenade).
+    // Grenade blast damage (set by player._explodeGrenade) — v3.13: the
+    // same shared _explodeHE the bots use, so bot and player grenades
+    // behave identically (radius, falloff, stats, friendly-fire rules).
     if (this.player.lastGrenadeBlast) {
       const blast = this.player.lastGrenadeBlast;
       this.player.lastGrenadeBlast = null;
-      for (const b of this.bots) {
-        if (!b.alive) continue;
-        // v3.9: the player's HE grenade never hurts Solara teammates.
-        if (b.team === 'solara') continue;
-        const d = b.pos.distanceTo(blast.pos);
-        if (d < blast.radius) {
-          const died = b.takeDamage(Math.round(blast.damage * (1 - d / blast.radius)));
-          if (died) {
-            // v3.10: a carrier killed by the HE blast used to vanish the
-            // bomb entirely (no transfer on this path at all).
-            if (b.isCarrier) { b.isCarrier = false; this.dropBomb(b.pos, b); }
-            this.player.money += 300;
-            this.events.push({
-              type: 'killfeed', killer: 'You', victim: b.name,
-              weapon: 'HE', headshot: false,
-            });
-            this._onPlayerKill(false);
-          }
-        }
-      }
-      const pd = this.player.pos.distanceTo(blast.pos);
-      if (pd < blast.radius && this.player.alive) this.player.damage(Math.round(blast.damage * (1 - pd / blast.radius) * 0.5), 'torso');
-      if (this.teamAlive('bastion') === 0 && !this.bombPlanted && this.phase === 'round') {
-        this.endRound('solara', 'TEAM ELIMINATED');
-      }
+      this._explodeHE(blast.pos, 'solara', this.player);
     }
     // Phase timers.
     if (this.phase === 'freeze') {
@@ -469,27 +638,52 @@ export class Sim {
       if (this.bombPlanted) {
         this.fuse -= dt;
         if (this.fuse <= 0) this._detonate();
+        // v3.13: bomb planted + every defender dead = attackers win now
+        // (no need to wait out the 40 s fuse while nobody can defuse).
+        else {
+          const defenders = this.attackTeam === 'solara' ? 'bastion' : 'solara';
+          if (this.teamAlive(defenders) === 0) this.endRound(this.plantTeam || this.attackTeam, 'SITE CLEARED');
+        }
       } else {
         this.timer -= dt;
-        if (this.timer <= 0) this.endRound('bastion', 'TIME EXPIRED');
+        // v3.13: time expiring with no plant wins the round for the
+        // DEFENDERS — whoever they are this round (was hardcoded Bastion).
+        if (this.timer <= 0) {
+          const defenders = this.attackTeam === 'solara' ? 'bastion' : 'solara';
+          this.endRound(defenders, 'TIME EXPIRED');
+        }
       }
-      // v3.10: pick up a dropped bomb — player or a living Solara bot
-      // walking over it becomes the carrier.
+      // v3.13: pick up a dropped bomb — ONLY the attacking team can
+      // recover it (player when Solara attacks, or an attacker bot). A
+      // defender walking over it must not pick it up.
       if (this.bombDropped) {
         const bp = this.bombDropped.pos;
         const p = this.player;
-        if (p.alive && Math.hypot(p.pos.x - bp.x, p.pos.z - bp.z) < 1.5) {
+        if (this.attackTeam === 'solara' && p.alive && Math.hypot(p.pos.x - bp.x, p.pos.z - bp.z) < 1.5) {
           p.hasBomb = true;
           this.bombDropped = null;
           this.events.push({ type: 'status', text: 'BOMB RECOVERED', dur: 2 });
         } else {
-          const mate = this.bots.find((b) => b.alive && b.team === 'solara'
+          const mate = this.bots.find((b) => b.alive && b.team === this.attackTeam
             && Math.hypot(b.pos.x - bp.x, b.pos.z - bp.z) < 1.5);
           if (mate) {
             mate.isCarrier = true;
             this.bombDropped = null;
             this.radio(mate, 'Got the bomb — pushing to the site!', true);
           }
+        }
+      }
+      // v3.13: bot-thrown HE grenades — same parabola + fuse as the
+      // player's (see player.js throwGrenade), detonated through the
+      // shared _explodeHE.
+      for (let i = this.botGrenades.length - 1; i >= 0; i--) {
+        const g = this.botGrenades[i];
+        g.fuse -= dt;
+        g.vel.y -= 9.8 * dt;
+        g.pos.addScaledVector(g.vel, dt);
+        if (g.pos.y <= 0.05 || g.fuse <= 0) {
+          this.botGrenades.splice(i, 1);
+          this._explodeHE(g.pos.clone(), g.team, g.thrower);
         }
       }
     } else if (this.phase === 'end') {
@@ -499,6 +693,8 @@ export class Sim {
           this.endMatch();
         } else {
           this.round++;
+          // v3.13: attack/defence swaps every round (item 1 + item 7).
+          this.attackTeam = this.attackTeam === 'solara' ? 'bastion' : 'solara';
           this.startRound();
           if (input.clearPressed) input.clearPressed();
         }
@@ -550,10 +746,12 @@ export class Sim {
       bombPlanted: this.bombPlanted, bombSite: this.bombSite,
       bombDropped: this.bombDropped, // v3.10: bots recover/guard a dropped bomb
       time: this.time, phase: this.phase, // v3.8: bots only shoot in 'round'
+      attackTeam: this.attackTeam, // v3.13: bots behave by role, not by hardcoded team
       smokes: this.smokes,
-      siteClear: (site) => this.siteClear(site),
+      siteClear: (site, team) => this.siteClear(site, team),
       onPlant: (bot) => this.onBotPlant(bot),
       onDefuse: (bot) => this.onBotDefuse(bot),
+      onBotGrenade: (bot, targetPos) => this.onBotGrenade(bot, targetPos), // v3.13
       onRadio: (bot, line, force) => this.radio(bot, line, force),
       onBotShot: (bot, enemy, hit, dist) => this.onBotShot(bot, enemy, hit, dist),
     };

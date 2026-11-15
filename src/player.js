@@ -120,6 +120,17 @@ export class Player {
     }
     this.viewmodel = group;
     this.muzzle = muzzle;
+    // v3.12: reload-mag prop — a spare magazine that drops out mid-reload
+    // and rises back in as the fresh mag. Driven in applyCamera(); hidden
+    // outside a reload. Sits in the mag well (local y -0.13, z 0.06).
+    const rmag = new THREE.Mesh(
+      new THREE.BoxGeometry(0.07, 0.16, 0.10),
+      new THREE.MeshStandardMaterial({ color: 0x2a2e33, roughness: 0.5, metalness: 0.6 }),
+    );
+    rmag.name = 'reload-mag';
+    rmag.visible = false;
+    group.add(rmag);
+    this._reloadMag = rmag;
     // CoD-style viewmodel pose: bigger, closer, barrel angled toward the
     // frame centre. Scale/pose per weapon kind; stock rear must stay in
     // front of the camera near plane (z < -0.1) or it clips.
@@ -287,12 +298,43 @@ export class Player {
       const kick = this.flashT > 0 ? 0.06 : 0;
       const vm = this.vmBase || { x: 0.26, y: -0.24, z: -0.45 };
       const lift = (this.vmBase && this.vmBase.adsLift) || 0;
+      // v3.12: RELOAD ANIMATION — while the current weapon reloads, the
+      // rifle dips down, tilts muzzle-down and rolls toward the player,
+      // then comes back up. Progress p runs 0 -> 1 over the weapon's
+      // reloadTime (reloading counts down in update()). The dip eases in
+      // over the first 30%, holds, and returns over the last 30%.
+      // Timing/ammo untouched — this is visual only.
+      let reloadP = 0, dip = 0;
+      const w = this.weapon;
+      if (w && w.reloading > 0) {
+        reloadP = Math.min(1, Math.max(0, 1 - w.reloading / w.def.reloadTime));
+        dip = reloadP < 0.3 ? reloadP / 0.3 : reloadP > 0.7 ? (1 - reloadP) / 0.3 : 1;
+      }
       this.viewmodel.position.set(
-        vm.x * (1 - ads) + bobX * 0.4,
-        vm.y + bobY * 0.5 + (ads ? 0.055 + lift : 0),
-        vm.z + kick + (ads ? -0.30 : 0),
+        vm.x * (1 - ads) + bobX * 0.4 * (1 - dip * 0.7),
+        vm.y + bobY * 0.5 * (1 - dip * 0.7) + (ads ? 0.055 + lift : 0) - dip * 0.12,
+        vm.z + kick + (ads ? -0.30 : 0) + dip * 0.05,
       );
-      this.viewmodel.rotation.x = this.recoilPitch * 1.4 + Math.sin(this.bobPhase) * 0.008;
+      this.viewmodel.rotation.x = this.recoilPitch * 1.4 + Math.sin(this.bobPhase) * 0.008 + dip * 0.55;
+      this.viewmodel.rotation.z = dip * 0.35;
+      // v3.12: spare-mag prop — old mag drops out (p 0.25–0.55), fresh mag
+      // rises back into the well (p 0.6–0.9). One mesh, two phases.
+      if (this._reloadMag) {
+        const rm = this._reloadMag;
+        if (reloadP >= 0.25 && reloadP < 0.55) {
+          const q = (reloadP - 0.25) / 0.30;
+          rm.visible = true;
+          rm.position.set(-0.03 * q, -0.13 - q * 0.35, 0.06 + q * 0.05);
+          rm.rotation.x = q * 0.5;
+        } else if (reloadP >= 0.6 && reloadP < 0.9) {
+          const q = (reloadP - 0.6) / 0.30;
+          rm.visible = true;
+          rm.position.set(0, -0.48 + q * 0.35, 0.06);
+          rm.rotation.x = (1 - q) * 0.5;
+        } else {
+          rm.visible = false;
+        }
+      }
       // ADS straightens the rifle so the sight sits dead centre.
       this.viewmodel.rotation.y = (this.vmBase ? this.vmBase.ry : 0) * (1 - ads);
     }

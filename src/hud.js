@@ -59,12 +59,20 @@ export class HUD {
     this.cross = el('div', 'cross', this.root);
     for (let i = 0; i < 4; i++) el('i', '', this.cross);
     this.hitmarker = el('div', 'hitmarker', this.root);
-    // --- Bottom-left: health + money ---
+    // --- v3.11 (OhMyGames): HP / ARMOR / CASH panel, top-left di kanan
+    // minimap — tiga baris berlabel, bukan satu baris padat.
     const bl = el('div', 'bl', this.root);
+    const hpRow = el('div', 'hp-row', bl);
+    el('span', 'row-label hp-label', hpRow).textContent = '♥ HP';
+    this.hpText = el('span', 'hptext', hpRow);
     this.hpBar = el('div', 'hpbar', bl);
     this.hpFill = el('div', 'hpfill', this.hpBar);
-    this.hpText = el('div', 'hptext', bl);
-    this.money = el('div', 'money', bl);
+    const armorRow = el('div', 'armor-row', bl);
+    el('span', 'row-label armor-label', armorRow).textContent = '🛡 ARMOR';
+    this.armorText = el('span', 'armor-val', armorRow);
+    const moneyRow = el('div', 'money-row', bl);
+    el('span', 'row-label cash-label', moneyRow).textContent = '$ CASH';
+    this.money = el('span', 'money', moneyRow);
     // --- Bottom-right: weapon slots + big ammo ---
     const br = el('div', 'br', this.root);
     this.slots = el('div', 'slots', br);
@@ -125,6 +133,10 @@ export class HUD {
     this.startOverlay = el('div', 'overlay', this.root);
     this.startOverlay.innerHTML = `<h1>FROSTLINE</h1>
       <p class="sub">Ironworks Ridge · 5v5 · Plant the bomb. Hold the snow.</p>
+      <div class="teams">
+        <div class="team-card team-sol"><b>SOLARA</b><span>ATTACK THE SITE</span></div>
+        <div class="team-card team-bas"><b>BASTION</b><span>HOLD THE SITE</span></div>
+      </div>
       <p class="controls">WASD move · Mouse aim · Click fire · R reload · Shift sprint · Space jump<br>
       Ctrl crouch · Right-click aim · B buy · E plant / defuse · G grenade · 4 cycle grenade · Q switch · Esc settings</p>
       <p class="cta">CLICK TO PLAY</p>`;
@@ -518,7 +530,8 @@ export class HUD {
     // Health / money / ammo / weapon slots / utility.
     this.hpFill.style.width = `${p.hp}%`;
     this.hpFill.style.background = p.hp > 50 ? '#6fc3d8' : p.hp > 25 ? '#ffb347' : '#e05a4e';
-    this.hpText.textContent = `HP ${Math.ceil(p.hp)}${p.armor > 0 ? `  ·  ARMOR ${Math.ceil(p.armor)}` : ''}${p.hasKit ? '  ·  KIT' : ''}`;
+    this.hpText.textContent = `${Math.ceil(p.hp)}`;
+    this.armorText.textContent = `${Math.ceil(p.armor)}${p.hasKit ? ' · KIT' : ''}`;
     this.money.textContent = `$${p.money}`;
     const w = p.weapon;
     this.ammo.innerHTML = `${w.ammo} <span>| ${w.reserve}</span>`;

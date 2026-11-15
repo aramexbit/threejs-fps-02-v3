@@ -12,6 +12,13 @@ import { buildDossier } from './vendor/makefun-threejs.ts';
 const repoRoot: string = dirname(fileURLToPath(import.meta.url));
 const outDir: string = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 
+// v3.9 (DeepSeek): rmSync(outDir, recursive) below wipes the whole output
+// tree — refuse an empty, root, or suspiciously short path so a bad env
+// var can never delete '/' or ''. Normal builds ('/output') are unaffected.
+if (!outDir || outDir === '/' || outDir.length < 2) {
+  throw new Error(`Refusing to build into unsafe output dir: ${JSON.stringify(outDir)}`);
+}
+
 function main(): void {
   rmSync(outDir, { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });

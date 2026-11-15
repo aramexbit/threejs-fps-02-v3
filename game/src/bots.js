@@ -66,16 +66,46 @@ export function buildBotMesh(team) {
   const legR = legL.clone();
   legR.position.x = 0.14;
   const armL = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.55, 0.16), suit);
-  armL.position.set(-0.33, 1.2, 0.1);
-  armL.rotation.x = -0.7;
+  armL.position.set(-0.33, 1.22, 0.16);
+  armL.rotation.x = -1.15; // v3.9: left hand reaches forward to the handguard
   const armR = armL.clone();
   armR.position.x = 0.33;
-  const gunM = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.12, 0.85), gun);
-  gunM.position.set(0.1, 1.32, -0.35);
-  for (const m of [torso, vestM, head, helmet, legL, legR, armL, armR, gunM]) {
+  armR.position.z = 0.14;
+  armR.rotation.x = -1.0; // v3.9: right hand at the grip
+  // v3.9: a full rifle, held forward at chest height — the old 0.85 m dark
+  // slab was unreadable at range, so bots looked unarmed. Receiver +
+  // barrel + handguard + magazine + stock + team-colour accent band;
+  // ~1.35 m long, muzzle ~0.85 m in front of the chest. The barrel steel
+  // is deliberately light so the rifle reads against dark containers too.
+  const gunLight = new THREE.MeshStandardMaterial({ color: 0x707b88, roughness: 0.35, metalness: 0.8 });
+  const accent = new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.3 });
+  const rifle = new THREE.Group();
+  const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.15, 0.55), gun);
+  const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.5), gunLight);
+  barrel.position.set(0, 0.02, -0.5);
+  const muzzle = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.1), gunLight);
+  muzzle.position.set(0, 0.02, -0.78);
+  const handguard = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.12, 0.32), gun);
+  handguard.position.set(0, 0, -0.3);
+  const mag = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.24, 0.13), gunLight);
+  mag.position.set(0, -0.17, 0.05);
+  mag.rotation.x = 0.25;
+  const stock = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.13, 0.28), gun);
+  stock.position.set(0, 0, 0.38);
+  const band = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.05, 0.12), accent);
+  band.position.set(0, 0.09, -0.05);
+  const sight = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.08, 0.12), gunLight);
+  sight.position.set(0, 0.11, -0.05);
+  for (const m of [receiver, barrel, muzzle, handguard, mag, stock, band, sight]) {
+    m.castShadow = true;
+    rifle.add(m);
+  }
+  rifle.position.set(0.08, 1.3, -0.15);
+  for (const m of [torso, vestM, head, helmet, legL, legR, armL, armR]) {
     m.castShadow = true;
     g.add(m);
   }
+  g.add(rifle);
   g.userData.head = head;
   return g;
 }
@@ -193,6 +223,9 @@ export class Bot {
   // Renamed to takeDamage; the numeric `this.damage` property is untouched.
   takeDamage(amount) {
     if (!this.alive) return false;
+    // v3.9 (DeepSeek): getting shot interrupts a plant/defuse channel —
+    // without this the bot kept its partial progress through the hit.
+    this.channel = 0;
     this.hp -= amount;
     if (this.hp <= 0) { this.hp = 0; this.alive = false; this.mesh.visible = false; }
     return !this.alive;
@@ -272,6 +305,10 @@ export class Bot {
     }
     if (this.hp < 25 && enemy) this.state = 'retreat';
     // --- Channel: plant / defuse ----------------------------------------------
+    // v3.9 (DeepSeek): a bot that stops channelling — site no longer clear,
+    // low-HP retreat, bomb gone — loses its partial progress, otherwise it
+    // could plant/defuse a little at a time across interruptions.
+    if (this.state !== 'plant' && this.state !== 'defuse') this.channel = 0;
     if (this.state === 'plant' && this.goal) {
       const d = Math.hypot(this.goal.x - this.pos.x, this.goal.z - this.pos.z);
       if (d < 1.5 && !enemy) {

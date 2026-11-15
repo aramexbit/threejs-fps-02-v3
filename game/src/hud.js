@@ -53,6 +53,7 @@ export class HUD {
     this.multiBanner = el('div', 'multibanner hidden', this.root);
     this._killBannerT = 0;
     this._multiBannerT = 0;
+    this._hitT = 0; // hitmarker display timer (v3.9)
     // --- Crosshair (centre) ---
     this.cross = el('div', 'cross', this.root);
     for (let i = 0; i < 4; i++) el('i', '', this.cross);
@@ -157,6 +158,14 @@ export class HUD {
     this.buyBackdrop.classList.toggle('hidden', !open);
     if (open) this.refreshBuy();
   }
+  // v3.9 (DeepSeek): the hitmarker element existed but nothing ever
+  // showed it. Flash it on every hit the player lands, red on headshot,
+  // and let update() hide it ~150 ms later.
+  showHitmarker(headshot) {
+    this.hitmarker.classList.toggle('hs', !!headshot);
+    this.hitmarker.style.display = 'block';
+    this._hitT = 0.15;
+  }
   showKillBanner(kind) {
     if (kind === 'headshot') {
       this.killBanner.innerHTML = `☠ HEADSHOT! <b>+100</b>`;
@@ -243,9 +252,10 @@ export class HUD {
     g.fillText('FOUNDRY', sx(15), sz(-12) + 17);
     g.fillText('CRANE YARD', sx(15), sz(12) + 17);
     g.fillText('MID', sx(0), sz(0) - 11);
-    // Planted bomb: pulsing ring.
+    // Planted bomb: pulsing ring (v3.9: sim time, not performance.now() —
+    // the minimap must stay deterministic like the rest of the sim).
     if (this.sim.bombPlanted && this.sim.bombPos) {
-      const pulse = 6 + Math.sin(performance.now() / 200) * 3;
+      const pulse = 6 + Math.sin(this.sim.time * 5) * 3;
       g.strokeStyle = '#ff2f2f'; g.lineWidth = 2;
       g.beginPath(); g.arc(sx(this.sim.bombPos.x), sz(this.sim.bombPos.z), pulse + 6, 0, Math.PI * 2); g.stroke();
     }
@@ -291,6 +301,7 @@ export class HUD {
     for (const e of events) {
       if (e.type === 'killfeed') this.pushFeed(e);
       if (e.type === 'killbanner') this.showKillBanner(e.kind);
+      if (e.type === 'hitmarker') this.showHitmarker(e.headshot);
       if (e.type === 'radio') this.pushChat(e.text, e.team);
       if (e.type === 'flash' && e.strength > 0) {
         this.flashFx.style.opacity = String(Math.min(1, e.strength));
@@ -308,6 +319,11 @@ export class HUD {
       const f = this.feedItems[i];
       f.t -= dt;
       if (f.t <= 0) { f.el.remove(); this.feedItems.splice(i, 1); }
+    }
+    // Hitmarker: shown on a hit, hidden ~150 ms later.
+    if (this._hitT > 0) {
+      this._hitT -= dt;
+      if (this._hitT <= 0) this.hitmarker.style.display = 'none';
     }
     // Chat timers.
     for (let i = this.chatItems.length - 1; i >= 0; i--) {

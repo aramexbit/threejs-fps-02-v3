@@ -44,7 +44,24 @@ export class Input {
   }
   requestLock() {
     if (this.shotMode || this.locked) return;
-    try { this.canvas.requestPointerLock(); } catch { /* headless: ignore */ }
+    try {
+      const p = this.canvas.requestPointerLock();
+      // v3.9 (Gemini G1): Chrome returns a Promise that rejects without a
+      // user gesture (e.g. re-locking when the round starts on a timer).
+      // Swallow it — the next canvas click re-locks. Without this guard
+      // the rejection surfaces as an uncaught page error.
+      if (p && p.catch) p.catch(() => {});
+    } catch { /* headless: ignore */ }
+  }
+  // v3.9 (Gemini G1): release the mouse so buy-menu buttons are clickable
+  // without pressing Esc first. No-op when not locked (incl. headless).
+  exitLock() {
+    if (!this.locked) return;
+    try { document.exitPointerLock(); } catch { /* ignore */ }
+    // The browser fires pointerlockchange async; clear the flag now so a
+    // re-lock right after (e.g. closing the buy menu) is not skipped when
+    // the event is delayed or missing. The event re-asserts the same value.
+    this.locked = false;
   }
   consume(code) {
     const had = this.pressed.has(code);

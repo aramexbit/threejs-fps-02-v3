@@ -51,6 +51,12 @@
   .cross i:nth-child(4) { top: calc(-1px + var(--sp)); left: -8px; height: 2px; width: 8px; }
   .cross.ads i { opacity: .35; }
   .hitmarker { position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; display: none; }
+  /* v3.9 (DeepSeek): the hitmarker div had no visible shape at all — draw
+     the X with two rotated bars; headshots show it in red. */
+  .hitmarker::before, .hitmarker::after { content: ''; position: absolute; left: 10px; top: 0; width: 2px; height: 22px; background: #fff; box-shadow: 0 0 4px rgba(0,0,0,.8); }
+  .hitmarker::before { transform: rotate(45deg); }
+  .hitmarker::after { transform: rotate(-45deg); }
+  .hitmarker.hs::before, .hitmarker.hs::after { background: #ff2f2f; }
   /* Bottom-left */
   .bl { position: absolute; left: 16px; bottom: 16px; background: rgba(13,17,23,.55); padding: 8px 12px 8px 10px; border-radius: 6px; }
   .hpbar { width: 220px; height: 12px; background: rgba(13,17,23,.7); border: 1px solid #4a5568; border-radius: 3px; overflow: hidden; }

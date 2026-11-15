@@ -293,11 +293,27 @@ function frame(now) {
   last = now;
   if (SHOT) dt = STEP; // deterministic pacing in shot mode
   // Buy menu toggle (freeze only).
-  if (!SHOT && input.consume('KeyB') && sim.phase === 'freeze') {
+  // v3.9: check the phase BEFORE consuming the key. The old order called
+  // consume('KeyB') first, so a B press outside freeze was silently eaten.
+  if (!SHOT && sim.phase === 'freeze' && input.consume('KeyB')) {
     hud.setBuyOpen(!hud.buyOpen);
+    // v3.9 (Gemini G1): the buy menu needs a free mouse — release the
+    // pointer lock when it opens so its buttons are clickable without
+    // pressing Esc first, and re-lock when it closes.
+    if (hud.buyOpen) input.exitLock();
+    else input.requestLock();
   }
-  if (!SHOT && input.consume('KeyR') && sim.phase === 'matchEnd') location.reload();
-  if (hud.buyOpen && sim.phase !== 'freeze') hud.setBuyOpen(false);
+  // v3.9: check the phase BEFORE consuming the key. The old order called
+  // consume('KeyR') first, so EVERY R press during 'round'/'freeze' was
+  // silently eaten by this matchEnd guard and sim.update's reload branch
+  // never saw it — manual reload with R NEVER worked (a major part of the
+  // reported "kadang peluru tidak keluar": mag empties, R does nothing,
+  // and v3.8 had no auto-reload, so the gun stayed dead for the round).
+  if (!SHOT && sim.phase === 'matchEnd' && input.consume('KeyR')) location.reload();
+  if (hud.buyOpen && sim.phase !== 'freeze') {
+    hud.setBuyOpen(false);
+    input.requestLock(); // round started: lock the mouse again
+  }
   // Fixed-step sim.
   acc += dt;
   let steps = 0;

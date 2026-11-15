@@ -262,7 +262,18 @@ export class Player {
   // Fire the current weapon. Returns a shot event for sim.js to resolve.
   tryFire(t, rng) {
     const w = this.weapon;
-    if (!w.fire(t)) { if (w.ammo === 0 && w.reloading <= 0) this.audio.dryFire(); return null; }
+    if (!w.fire(t)) {
+      // v3.9: auto-reload on empty. Without it the gun goes dead after the
+      // 25-round mag and every click is just a dry click until the player
+      // remembers R — the reported "kadang peluru tidak keluar". Trying to
+      // fire on an empty mag with reserve left starts the reload (with the
+      // reload sound); the dry click only plays when nothing is left to load.
+      if (w.ammo === 0 && w.reloading <= 0) {
+        if (w.reserve > 0 && w.startReload()) this.audio.reload();
+        else this.audio.dryFire();
+      }
+      return null;
+    }
     const spreadBase = w.def.spread + (this.crouching ? -0.002 : 0)
       + Math.hypot(this.vel.x, this.vel.z) * 0.0012
       + (this.adsHeld ? w.def.spread * (w.def.adsSpreadMult - 1) : 0);

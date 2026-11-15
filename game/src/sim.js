@@ -53,11 +53,12 @@ export class Sim {
       if (!b.alive || b.team !== 'bastion') continue;
       if (Math.hypot(b.pos.x - c.x, b.pos.z - c.z) < 7) return false;
     }
-    if (this.player.alive && this.player.pos.distanceTo(new THREE.Vector3(c.x, 0, c.z)) > 9) {
-      // The player is far from the site; defenders near it still block the plant.
-    }
-    return this.bots.filter((b) => b.alive && b.team === 'bastion'
-      && Math.hypot(b.pos.x - c.x, b.pos.z - c.z) < 7).length === 0;
+    // v3.9 (Gemini G2): the old code had an empty if-block here — player
+    // proximity never blocked the bot plant. The carrier bot only plants
+    // when the player is far from the site; when the player is close
+    // (< 9 m) the player plants with E themselves, so the bot waits.
+    if (this.player.alive && this.player.pos.distanceTo(new THREE.Vector3(c.x, 0, c.z)) < 9) return false;
+    return true;
   }
 
   // --- Round lifecycle ---------------------------------------------------------
@@ -235,8 +236,12 @@ export class Sim {
     let bestT = Infinity;
     let best = null; // {kind:'bot'|'wall', bot, part, point}
     // Bots: head sphere, torso + legs as spheres (cheap, stable).
+    // v3.9 (Grok audit #1): player shots NEVER hit Solara teammates —
+    // resolveShot is only ever called for the player's own fire
+    // (sim.js:444), so skipping team 'solara' here kills friendly fire.
     for (const b of this.bots) {
       if (!b.alive) continue;
+      if (b.team === 'solara') continue;
       const headC = new THREE.Vector3(b.pos.x, b.pos.y + 1.66, b.pos.z);
       const torsoC = new THREE.Vector3(b.pos.x, b.pos.y + 1.15, b.pos.z);
       const legsC = new THREE.Vector3(b.pos.x, b.pos.y + 0.45, b.pos.z);
@@ -269,6 +274,9 @@ export class Sim {
       const dmg = Math.round(weapon.def.damage * mult);
       const killed = best.bot.takeDamage(dmg);
       this.audio.hit();
+      // v3.9 (DeepSeek): the hitmarker never showed — push the event so
+      // the HUD flashes it on every landed hit (red on headshot).
+      this.events.push({ type: 'hitmarker', headshot: best.part === 'head' });
       this.fx.particles.burst(point, 6, 2.5, 0.5, [0.75, 0.15, 0.12], 0.8, -3);
       if (killed) {
         this.audio.kill();
@@ -387,6 +395,8 @@ export class Sim {
       this.player.lastGrenadeBlast = null;
       for (const b of this.bots) {
         if (!b.alive) continue;
+        // v3.9: the player's HE grenade never hurts Solara teammates.
+        if (b.team === 'solara') continue;
         const d = b.pos.distanceTo(blast.pos);
         if (d < blast.radius) {
           const died = b.takeDamage(Math.round(blast.damage * (1 - d / blast.radius)));
@@ -470,6 +480,52 @@ export class Sim {
       onBotShot: (bot, enemy, hit, dist) => this.onBotShot(bot, enemy, hit, dist),
     };
     for (const b of this.bots) b.update(dt, ctx);
+    // v3.9 (Grok audit): simple separation — bots must not overlap each
+    // other or the player (previously only map colliders blocked them).
+    this._separateBodies();
     // Hear the player's shots (already done above for bots).
+  }
+
+  // Push overlapping bodies apart on the XZ plane. Bots are pushed away
+  // from each other (half each) and away from the player (bot moves, the
+  // player is user-controlled). Mesh x/z are re-synced so the visual never
+  // lags a step behind; y (walk bob) is left to _syncMesh.
+  _separateBodies() {
+    const MIN = 0.7; // body-radius sum: ~0.35 m per body
+    const alive = this.bots.filter((b) => b.alive);
+    for (let i = 0; i < alive.length; i++) {
+      for (let j = i + 1; j < alive.length; j++) {
+        const a = alive[i], c = alive[j];
+        const dx = c.pos.x - a.pos.x, dz = c.pos.z - a.pos.z;
+        const d2 = dx * dx + dz * dz;
+        if (d2 < MIN * MIN) {
+          // Exactly stacked (d = 0) has no push direction — use a fixed
+          // deterministic one. The push itself always uses the TRUE
+          // distance; only the direction falls back (a fallback computed
+          // from d = 1 would push them together instead of apart).
+          const d = Math.sqrt(d2);
+          const push = (MIN - d) / 2;
+          const nx = d > 1e-6 ? dx / d : 1, nz = d > 1e-6 ? dz / d : 0;
+          a.pos.x -= nx * push; a.pos.z -= nz * push;
+          c.pos.x += nx * push; c.pos.z += nz * push;
+          a.mesh.position.x = a.pos.x; a.mesh.position.z = a.pos.z;
+          c.mesh.position.x = c.pos.x; c.mesh.position.z = c.pos.z;
+        }
+      }
+      const p = this.player;
+      if (p.alive) {
+        const b = alive[i];
+        const dx = b.pos.x - p.pos.x, dz = b.pos.z - p.pos.z;
+        const d2 = dx * dx + dz * dz;
+        if (d2 < MIN * MIN) {
+          const d = Math.sqrt(d2);
+          const push = MIN - d;
+          const nx = d > 1e-6 ? dx / d : 1, nz = d > 1e-6 ? dz / d : 0;
+          b.pos.x += nx * push;
+          b.pos.z += nz * push;
+          b.mesh.position.x = b.pos.x; b.mesh.position.z = b.pos.z;
+        }
+      }
+    }
   }
 }

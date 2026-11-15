@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>FROSTLINE — Ironworks Ridge</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #0d1117; }
+  #game { display: block; width: 100vw; height: 100vh; }
+  .hud { position: fixed; inset: 0; pointer-events: none; font-family: system-ui, sans-serif; color: #eef2f6; }
+  .hidden { display: none !important; }
+  /* Minimap */
+  .minimap-wrap { position: absolute; top: 14px; left: 14px; }
+  .minimap { width: 168px; height: 168px; border-radius: 50%; box-shadow: 0 0 0 3px #4a5568, 0 4px 18px rgba(0,0,0,.5); background: #dfe6ec; }
+  /* Score + timer */
+  .score { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; align-items: center; font-weight: 800; letter-spacing: .06em; text-shadow: 0 2px 6px rgba(0,0,0,.7); }
+  .score-sol { color: #ff7a2f; } .score-bas { color: #6fc3d8; } .score-mid { color: #eef2f6; font-size: 13px; opacity: .85; }
+  .timer { position: absolute; top: 44px; left: 50%; transform: translateX(-50%); font-size: 26px; font-weight: 800; text-shadow: 0 2px 8px rgba(0,0,0,.8); }
+  .timer.urgent { color: #ff5a4e; }
+  .bomb-status { position: absolute; top: 78px; left: 50%; transform: translateX(-50%); font-size: 13px; font-weight: 700; color: #ffd24a; text-shadow: 0 2px 6px rgba(0,0,0,.8); }
+  /* Kill feed */
+  .feed { position: absolute; top: 14px; right: 16px; text-align: right; font-size: 13px; font-weight: 600; }
+  .feed-item { background: rgba(13,17,23,.72); border-right: 3px solid #ff7a2f; padding: 4px 9px; margin-bottom: 5px; border-radius: 3px; }
+  /* Banner */
+  .banner { position: absolute; top: 30%; left: 50%; transform: translate(-50%, -50%); font-size: 30px; font-weight: 900; letter-spacing: .08em; text-align: center; text-shadow: 0 3px 14px rgba(0,0,0,.9); color: #ffb347; white-space: nowrap; }
+  /* Crosshair */
+  .cross { position: absolute; left: 50%; top: 50%; width: 0; height: 0; --sp: 8px; }
+  .cross i { position: absolute; background: rgba(238,242,246,.95); box-shadow: 0 0 3px #000; }
+  .cross i:nth-child(1) { left: calc(-1px + var(--sp) * -1); top: -8px; width: 2px; height: 8px; }
+  .cross i:nth-child(2) { left: calc(-1px + var(--sp)); top: -8px; width: 2px; height: 8px; }
+  .cross i:nth-child(3) { top: calc(-1px + var(--sp) * -1); left: -8px; height: 2px; width: 8px; }
+  .cross i:nth-child(4) { top: calc(-1px + var(--sp)); left: -8px; height: 2px; width: 8px; }
+  .cross.ads i { opacity: .35; }
+  .hitmarker { position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; display: none; }
+  /* Bottom-left */
+  .bl { position: absolute; left: 16px; bottom: 16px; }
+  .hpbar { width: 220px; height: 12px; background: rgba(13,17,23,.7); border: 1px solid #4a5568; border-radius: 3px; overflow: hidden; }
+  .hpfill { height: 100%; width: 100%; background: #6fc3d8; }
+  .hptext { margin-top: 5px; font-weight: 800; font-size: 15px; text-shadow: 0 2px 6px rgba(0,0,0,.8); }
+  .money { margin-top: 3px; font-size: 15px; font-weight: 800; color: #ffd24a; text-shadow: 0 2px 6px rgba(0,0,0,.8); }
+  /* Bottom-right ammo */
+  .br { position: absolute; right: 20px; bottom: 14px; text-align: right; }
+  .ammo { font-size: 44px; font-weight: 900; line-height: 1; text-shadow: 0 3px 10px rgba(0,0,0,.85); }
+  .ammo span { font-size: 22px; color: #9aa8b8; }
+  .wname { font-size: 14px; font-weight: 700; color: #9aa8b8; margin-top: 2px; }
+  .grenades { font-size: 13px; font-weight: 700; color: #ffb347; margin-top: 2px; }
+  /* Channel */
+  .channel { position: absolute; left: 50%; bottom: 22%; transform: translateX(-50%); width: 280px; text-align: center; }
+  .channelfill { height: 10px; background: #ffb347; border-radius: 3px; width: 0; }
+  .channellabel { font-size: 13px; font-weight: 800; letter-spacing: .1em; margin-top: 5px; text-shadow: 0 2px 6px #000; }
+  .damagefx { position: absolute; inset: 0; box-shadow: inset 0 0 90px 30px rgba(224,60,50,.55); opacity: 0; transition: opacity .25s; }
+  /* Buy menu */
+  .buy { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 380px; background: rgba(13,17,23,.92); border: 1px solid #4a5568; border-radius: 8px; padding: 18px; pointer-events: auto; }
+  .buy-title { font-size: 20px; font-weight: 900; letter-spacing: .06em; color: #ffb347; margin-bottom: 4px; }
+  .buy-money { font-size: 15px; font-weight: 800; color: #ffd24a; margin-bottom: 10px; }
+  .buy-item { display: flex; justify-content: space-between; width: 100%; padding: 9px 12px; margin-bottom: 6px; background: #1c222b; color: #eef2f6; border: 1px solid #4a5568; border-radius: 5px; font-size: 15px; font-weight: 700; cursor: pointer; }
+  .buy-item:hover { border-color: #ffb347; background: #2a2013; }
+  .buy-hint { font-size: 12px; color: #9aa8b8; margin-top: 8px; }
+  /* Overlays */
+  .overlay { position: absolute; inset: 0; background: rgba(10, 13, 18, .78); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; pointer-events: auto; }
+  .overlay h1 { font-size: 64px; letter-spacing: .14em; margin: 0; color: #eef2f6; text-shadow: 0 4px 24px rgba(0,0,0,.8); }
+  .overlay .sub { font-size: 17px; color: #ffb347; font-weight: 700; margin: 10px 0 4px; }
+  .overlay .controls { font-size: 14px; color: #9aa8b8; line-height: 1.7; }
+  .overlay .cta { font-size: 20px; font-weight: 900; letter-spacing: .12em; color: #6fc3d8; animation: pulse 1.6s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three/three.module.min.js" } }
+</script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>

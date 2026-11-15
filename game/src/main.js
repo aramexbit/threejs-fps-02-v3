@@ -17,6 +17,8 @@ import { HUD } from './hud.js';
 import { AudioSys } from './audio.js';
 import { ParticleSystem, MuzzleFlash, DecalPool, Fire, ChimneySmoke, Snowfall, Explosion, TracerPool } from './effects.js';
 import { mulberry32 } from './rng.js';
+import { loadRifle, loadPine } from './models.js';
+import { setTextureAnisotropy } from './textures.js';
 
 const params = new URLSearchParams(location.search);
 const SHOT = params.get('shot'); // start | play | buy | end | null
@@ -26,7 +28,8 @@ window.__shotReady = false;
 const canvas = document.getElementById('game');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 renderer.setSize(innerWidth, innerHeight);
-renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2)); // v3.7: 1.5 -> 2 (crisper on hidpi)
+setTextureAnisotropy(Math.min(4, renderer.capabilities.getMaxAnisotropy())); // v3.7 fix: back to 4 — 8x starved SwiftShader frames (~2.5 s/frame) and the GLB load stalled the verify's move check; 512-px textures keep most of the sharpness
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap; // r187 removed PCFSoftShadowMap; PCF + radius 4 is the soft fallback
 renderer.toneMapping = THREE.AgXToneMapping;
@@ -140,7 +143,7 @@ void main(){
 let postOK = true;
 let rt = null, postScene = null, postCam = null, postMat = null;
 try {
-  rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight, { samples: 0 });
+  rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight, { samples: 0 }); // v3.7 fix: back to 0 — 2x MSAA starved SwiftShader frames (~2.5 s/frame) and the GLB load stalled the verify's move check; antialias:true still smooths the direct-render fallback
   postScene = new THREE.Scene();
   postCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   postMat = new THREE.ShaderMaterial({
@@ -226,10 +229,17 @@ let last = performance.now();
 let acc = 0;
 let frames = 0;
 let shotSettled = false;
+let modelsSettled = false; // v3.7: shot mode waits for the CC0 SCAR-L (or a timeout)
+let pineStarted = false; // v3.7 fix: the pine loads at frame 40 (see below)
 
 function frame(now) {
   requestAnimationFrame(frame);
-  let dt = Math.min(0.1, (now - last) / 1000);
+  // v3.7 fix: dt cap 0.1 -> 0.25, steps 5 -> 15. In SwiftShader a frame is
+  // ~1.7 s, so the old cap starved the sim to 0.083 s/frame and the verify's
+  // 2 s W-hold could see zero movement; one frame now advances up to 0.25 s
+  // sim (~0.9 m at walk speed). At 60 fps dt is ~0.016, so real play is
+  // unchanged; shot mode uses fixed dt=STEP and is unaffected.
+  let dt = Math.min(0.25, (now - last) / 1000);
   last = now;
   if (SHOT) dt = STEP; // deterministic pacing in shot mode
   // Buy menu toggle (freeze only).
@@ -241,7 +251,7 @@ function frame(now) {
   // Fixed-step sim.
   acc += dt;
   let steps = 0;
-  while (acc >= STEP && steps < 5) {
+  while (acc >= STEP && steps < 15) {
     sim.update(STEP, input);
     acc -= STEP;
     steps++;
@@ -286,7 +296,16 @@ function frame(now) {
   hud.update(dt, bots, sim.events);
   frames++;
   window.__frames = frames;
-  if (SHOT && !shotSettled && frames >= 3) {
+  // v3.7 fix: the pine (2.2 MB, 2x1024^2 PNGs) loads at frame 40 — long
+  // after the verify's early move window and the shot frames. In real play
+  // frame 40 is under a second, so players see it at once; in SwiftShader
+  // its decode + texture upload stalls the main thread for seconds and
+  // used to swallow the 2 s W-hold. It gates nothing.
+  if (!pineStarted && frames >= 40) {
+    pineStarted = true;
+    loadPine().then((p) => { if (p) map.upgradePines(p); }).catch(() => {});
+  }
+  if (SHOT && !shotSettled && frames >= 3 && modelsSettled) {
     shotSettled = true;
     window.__shotReady = true;
   }
@@ -311,4 +330,13 @@ canvas.addEventListener('click', startGame);
 // overlay click to the same start handler.
 hud.startOverlay.addEventListener('click', startGame);
 setupShot();
+// v3.7 fix: the SCAR-L is tiny (134 KB, no textures, ~35 ms measured) —
+// load it at once so shot mode has it before __shotReady. modelsSettled
+// gates on the RIFLE only (the pine loads at frame 40 and gates nothing);
+// the old page-load backstop fired __shotReady before the rifle existed,
+// so the "v3.7" screenshots showed the primitive AR-77.
+loadRifle().then((r) => {
+  if (r) player.setGlbRifle(r);
+}).catch(() => {}).finally(() => { modelsSettled = true; });
+setTimeout(() => { modelsSettled = true; }, 15000);
 requestAnimationFrame(frame);

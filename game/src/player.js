@@ -68,7 +68,15 @@ export class Player {
     this.grenade = null; // active thrown grenade {pos, vel, fuse}
     this.cameraShake = 0;
     this.viewmodel = null; this.muzzle = null;
+    this._glbRifle = null; // v3.7: CC0 SCAR-L viewmodel, set async once loaded
     this.equip(0);
+  }
+  // v3.7: swap the AR-77 viewmodel to the CC0 GLB rifle once it loads.
+  // If the player is holding the AR-77, re-equip so the swap shows at once;
+  // other weapons keep their primitive viewmodels.
+  setGlbRifle(normalized) {
+    this._glbRifle = normalized;
+    if (this.slots[this.slot].def.id === 'ar77') this.equip(this.slot);
   }
   get weapon() { return this.slots[this.slot]; }
   get eyeY() { return this.pos.y + (this.crouching ? EYE_CROUCH : EYE_STAND); }
@@ -77,7 +85,16 @@ export class Player {
     if (index < 0 || index >= this.slots.length) return;
     this.slot = index;
     if (this.viewmodel) this.camera.remove(this.viewmodel);
-    const { group, muzzle } = buildViewmodel(this.slots[index].def.id);
+    // v3.7: the AR-77 uses the CC0 SCAR-L GLB once loaded (cloned per
+    // equip; geometries/materials are shared). Other weapons and the
+    // pre-load AR-77 keep the primitive viewmodel.
+    let group, muzzle;
+    if (this.slots[index].def.id === 'ar77' && this._glbRifle) {
+      group = this._glbRifle.group.clone();
+      muzzle = group.getObjectByName('muzzle');
+    } else {
+      ({ group, muzzle } = buildViewmodel(this.slots[index].def.id));
+    }
     this.viewmodel = group;
     this.muzzle = muzzle;
     // CoD-style viewmodel pose: bigger, closer, barrel angled toward the
@@ -87,7 +104,7 @@ export class Player {
       p9: { s: 1.3, x: 0.27, y: -0.25, z: -0.50, ry: 0.06 },
       vex9: { s: 1.4, x: 0.29, y: -0.26, z: -0.55, ry: 0.10 },
       ar77: { s: 1.4, x: 0.30, y: -0.27, z: -0.55, ry: 0.12 },
-      longbow: { s: 1.4, x: 0.30, y: -0.27, z: -0.55, ry: 0.10 },
+      longbow: { s: 1.2, x: 0.30, y: -0.27, z: -0.62, ry: 0.10, adsLift: 0.15 }, // v3.7 fix: stock rear was at z=-0.02 (inside the 0.1 near plane) so the stock clipped into a giant slab; s 1.2 / z -0.62 puts the rear at -0.164. adsLift aligns the scope (local y 0.055 x 1.2 = 0.066) with the crosshair in ADS — without it the scope sat ~0.15 below the sight line and the stock bulk filled the lower screen.
       he: { s: 1.3, x: 0.26, y: -0.25, z: -0.48, ry: 0.05 },
     }[this.slots[index].def.id] || { s: 1.3, x: 0.26, y: -0.24, z: -0.45, ry: 0 };
     this.vmBase = pose;
@@ -221,13 +238,19 @@ export class Player {
       this.camera.updateProjectionMatrix();
     }
     // Viewmodel: ADS pulls it to centre, firing kicks it back, bob sways it.
+    // adsLift (per-weapon, default 0) raises the sight onto the crosshair in
+    // ADS — the uniform +0.055 rise leaves the Longbow scope ~0.15 low.
+    // ADS also pushes the gun 0.30 forward: without it the stock rear sits
+    // 0.10–0.16 m from the eye and fills the lower screen as a giant black
+    // slab (worst on the long-stocked Longbow, but the same on every weapon).
     if (this.viewmodel) {
       const kick = this.flashT > 0 ? 0.06 : 0;
       const vm = this.vmBase || { x: 0.26, y: -0.24, z: -0.45 };
+      const lift = (this.vmBase && this.vmBase.adsLift) || 0;
       this.viewmodel.position.set(
         vm.x * (1 - ads) + bobX * 0.4,
-        vm.y + bobY * 0.5 + (ads ? 0.055 : 0),
-        vm.z + kick,
+        vm.y + bobY * 0.5 + (ads ? 0.055 + lift : 0),
+        vm.z + kick + (ads ? -0.30 : 0),
       );
       this.viewmodel.rotation.x = this.recoilPitch * 1.4 + Math.sin(this.bobPhase) * 0.008;
       // ADS straightens the rifle so the sight sits dead centre.

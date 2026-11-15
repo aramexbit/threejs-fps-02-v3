@@ -9,6 +9,14 @@
 import * as THREE from 'three';
 import { fbm, hash2, mulberry32, vnoise, voronoi } from './rng.js';
 
+// v3.7 HD pass: anisotropy starts at 4 (safe default) and main.js raises it
+// to min(8, renderer max) once the renderer exists — the single biggest
+// cheap win for grazing-angle sharpness on ground/containers. Textures are
+// painted inside buildMap, which runs after the renderer is created, so
+// the raised value applies to every texture.
+let TEX_ANISO = 4;
+export function setTextureAnisotropy(v) { TEX_ANISO = Math.max(1, Math.floor(v)); }
+
 function cv(size) {
   const c = document.createElement('canvas');
   c.width = size; c.height = size;
@@ -18,7 +26,7 @@ function tex(canvas, repeat = 1) {
   const t = new THREE.CanvasTexture(canvas);
   t.wrapS = THREE.RepeatWrapping; t.wrapT = THREE.RepeatWrapping;
   t.repeat.set(repeat, repeat);
-  t.anisotropy = 4;
+  t.anisotropy = TEX_ANISO;
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
@@ -26,7 +34,7 @@ function texLinear(canvas, repeat = 1) {
   const t = new THREE.CanvasTexture(canvas);
   t.wrapS = THREE.RepeatWrapping; t.wrapT = THREE.RepeatWrapping;
   t.repeat.set(repeat, repeat);
-  t.anisotropy = 4;
+  t.anisotropy = TEX_ANISO;
   return t; // data maps (normal / ORM) stay linear — never sRGB.
 }
 
@@ -178,7 +186,8 @@ export function rockTextures(seed = 83, size = 256) {
 }
 
 // --- Concrete (industrial walls, pads) — cold, stained ----------------------
-export function concreteTextures(seed = 23, size = 256) {
+// v3.7: 256 -> 512 (most visible wall surface; the extra paint time is ~1 s).
+export function concreteTextures(seed = 23, size = 512) {
   const albedo = cv(size), g = albedo.getContext('2d');
   const img = g.createImageData(size, size);
   const height = new Float32Array(size * size);
@@ -213,7 +222,8 @@ export function concreteTextures(seed = 23, size = 256) {
 // --- Rusted container steel ---------------------------------------------------
 // Corrugated ribs (vertical stripes in height) + rust blooms + paint worn
 // to bare metal on the ribs' crests. `tint` picks the container's paint.
-export function containerTextures(tint = [158, 62, 44], seed = 37, size = 256) {
+// v3.7: 256 -> 512 (the biggest visible surface in the game).
+export function containerTextures(tint = [158, 62, 44], seed = 37, size = 512) {
   const albedo = cv(size), g = albedo.getContext('2d');
   const img = g.createImageData(size, size);
   const height = new Float32Array(size * size);
@@ -254,7 +264,8 @@ export function containerTextures(tint = [158, 62, 44], seed = 37, size = 256) {
 }
 
 // --- Wood (crates, barricades, firewood) --------------------------------------
-export function woodTextures(seed = 51, size = 256) {
+// v3.7: 256 -> 512 (crates are the most-handled prop surface).
+export function woodTextures(seed = 51, size = 512) {
   const albedo = cv(size), g = albedo.getContext('2d');
   const img = g.createImageData(size, size);
   const height = new Float32Array(size * size);
@@ -361,7 +372,7 @@ export function siteLetterTexture(letter) {
   }
   g.globalCompositeOperation = 'source-over';
   const t = new THREE.CanvasTexture(c);
-  t.anisotropy = 4;
+  t.anisotropy = TEX_ANISO;
   return t;
 }
 
@@ -397,7 +408,7 @@ export function siteSignTexture(letter, name) {
   g.font = 'bold 30px system-ui, sans-serif';
   g.fillText(name.toUpperCase(), 118, 132);
   const t = new THREE.CanvasTexture(c);
-  t.anisotropy = 4;
+  t.anisotropy = TEX_ANISO;
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }

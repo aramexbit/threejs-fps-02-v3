@@ -448,6 +448,9 @@ export function buildMap(scene) {
   // Pine trees: trunk + 3 stacked cones, snow-tipped top cone. Tall ones
   // outside the walls read over them; three in-bounds pines sit in the
   // corners, outside the waypoint box, with colliders.
+  // v3.7: each pine group is recorded so upgradePines() can swap the cones
+  // for a clone of the CC0 Quaternius pine GLB (same spot/scale/collider).
+  const pineGroups = [];
   const pine = (x, z, s, solid) => {
     const g = new THREE.Group();
     g.position.set(x, 0, z);
@@ -461,6 +464,7 @@ export function buildMap(scene) {
       g.add(cone);
     }
     group.add(g);
+    pineGroups.push({ g, s });
     if (solid) addCollider(x, z, 0.3, 0.3, 6 * s);
   };
   pine(-27, -4, 1.1, false); pine(-28, 16, 1.3, false); pine(27, -16, 1.2, false);
@@ -650,6 +654,18 @@ export function buildMap(scene) {
   return {
     group, colliders, waypoints, sites: SITES, spawns: SPAWNS,
     bounds: { minX: -MAP.halfW, maxX: MAP.halfW, minZ: -MAP.halfH, maxZ: MAP.halfH },
+    // v3.7: replace the cone pines with clones of the CC0 pine GLB.
+    // The GLB is ~7.3 m tall; the cone pines top out at ~5.1*s, so scale
+    // 0.7*s matches the old silhouette. Rotation varies per tree.
+    upgradePines(glbPine) {
+      pineGroups.forEach(({ g, s }, i) => {
+        g.clear();
+        const tree = glbPine.clone();
+        tree.scale.setScalar(0.7 * s);
+        tree.rotation.y = (i * 1.7) % (Math.PI * 2);
+        g.add(tree);
+      });
+    },
     fireSpots: [
       { pos: new THREE.Vector3(0, 0.4, 6), kind: 'bonfire' },
       { pos: new THREE.Vector3(3, 0.9, 3), kind: 'bonfire' }, // v3.2: burning barrel in mid

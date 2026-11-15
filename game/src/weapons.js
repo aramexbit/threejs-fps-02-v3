@@ -132,7 +132,8 @@ function cyl(rt, rb, h, mat, x, y, z, rx = Math.PI / 2, seg = 12) {
 
 // A simple gloved hand: palm + curled fingers + cuff, gripping at (x,y,z)
 // with the fingers wrapped around a grip. `tilt` rotates the grip angle.
-function glovedHand(x, y, z, tilt = 0.25) {
+// Exported for models.js: the GLB rifle gets the same hands as the primitives.
+export function glovedHand(x, y, z, tilt = 0.25) {
   const M = mats();
   const hand = new THREE.Group();
   hand.position.set(x, y, z);

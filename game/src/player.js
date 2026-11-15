@@ -58,7 +58,9 @@ export class Player {
     this.money = 800;
     this.slots = [new Weapon(WEAPONS.p9)];
     this.slot = 0;
-    this.grenades = 0;
+    this.grenades = { he: 0, smoke: 0, flash: 0 };
+    this.grenadeType = 'he'; // cycled with key 4; G throws the selected type
+    this.hasKit = false; // defuse kit: defuse 2.5 s instead of 5 s
     this.hasBomb = false;
     this.recoil = 0; this.recoilPitch = 0;
     this.bobPhase = 0; this.stepTimer = 0;
@@ -96,15 +98,28 @@ export class Player {
   }
   buy(id) {
     const def = WEAPONS[id];
-    if (!def) return false;
-    if (id === 'he') {
-      if (this.money < def.price || this.grenades >= 2) return false;
-      this.money -= def.price; this.grenades++;
-      return true;
+    if (!def) {
+      // Non-weapon gear (not in the WEAPONS table).
+      if (id === 'vest') {
+        if (this.money < 400 || this.armor >= 50) return false;
+        this.money -= 400; this.armor = 50;
+        return true;
+      }
+      if (id === 'armor') {
+        if (this.money < 650 || this.armor >= 100) return false;
+        this.money -= 650; this.armor = 100;
+        return true;
+      }
+      if (id === 'kit') {
+        if (this.money < 400 || this.hasKit) return false;
+        this.money -= 400; this.hasKit = true;
+        return true;
+      }
+      return false;
     }
-    if (id === 'armor') {
-      if (this.money < 650 || this.armor >= 100) return false;
-      this.money -= 650; this.armor = 100;
+    if (def.kind === 'grenade') {
+      if (this.money < def.price || this.grenades[id] >= 2) return false;
+      this.money -= def.price; this.grenades[id]++;
       return true;
     }
     if (this.money < def.price) return false;
@@ -153,13 +168,14 @@ export class Player {
       if (this.stepTimer <= 0) { this.stepTimer = 2.1; this.audio.step(); }
     }
     this.weapon.update(dt);
-    // Grenade physics.
+    // Grenade physics. Flash pops mid-air on fuse; HE/smoke detonate on
+    // ground contact or when the fuse runs out.
     if (this.grenade) {
       const g = this.grenade;
       g.fuse -= dt;
       g.vel.y -= 9.8 * dt;
       g.pos.addScaledVector(g.vel, dt);
-      if (g.pos.y <= 0.05 || g.fuse <= 0) this._explodeGrenade(g);
+      if (g.type === 'flash' ? g.fuse <= 0 : (g.pos.y <= 0.05 || g.fuse <= 0)) this._detonateGrenade(g);
     }
   }
   _moveAxis(dt, axis) {
@@ -246,24 +262,44 @@ export class Player {
     dir.z += (rng() - 0.5) * spread * 2;
     return dir.normalize();
   }
+  cycleGrenade() {
+    const order = ['he', 'smoke', 'flash'];
+    const i = order.indexOf(this.grenadeType);
+    this.grenadeType = order[(i + 1) % order.length];
+  }
   throwGrenade(t) {
-    if (this.grenades <= 0 || this.grenade) return false;
-    this.grenades--;
+    const type = this.grenadeType;
+    if (this.grenades[type] <= 0 || this.grenade) return false;
+    this.grenades[type]--;
     const dir = new THREE.Vector3(0, 0, -1).applyEuler(this.camera.rotation);
     this.grenade = {
+      type,
       pos: this.camera.position.clone().addScaledVector(dir, 0.6),
       vel: dir.multiplyScalar(13).add(new THREE.Vector3(0, 4.5, 0)),
-      fuse: WEAPONS.he.fuse,
+      fuse: WEAPONS[type].fuse,
     };
     return true;
   }
-  _explodeGrenade(g) {
+  _detonateGrenade(g) {
     const p = g.pos.clone();
     this.grenade = null;
-    this.fx.explosion.trigger(p);
-    this.audio.explosion();
-    this.cameraShake = 1;
-    this.lastGrenadeBlast = { pos: p, radius: WEAPONS.he.radius, damage: WEAPONS.he.damage };
+    if (g.type === 'smoke') {
+      // Smoke cloud: sim.js picks up lastSmoke and blocks bot LOS for 9 s.
+      p.y = Math.max(0.4, p.y);
+      this.lastSmoke = { pos: p, radius: WEAPONS.smoke.radius, duration: WEAPONS.smoke.duration };
+      this.fx.particles.smoke(p, 24, 2.5, 1.2, 3);
+      this.audio.beep();
+    } else if (g.type === 'flash') {
+      // Flashbang: sim.js picks up lastFlash; blinds bots + flashes the player.
+      this.lastFlash = { pos: p, radius: WEAPONS.flash.radius, blindTime: WEAPONS.flash.blindTime };
+      this.fx.flash.fire(p);
+      this.audio.beep(true);
+    } else {
+      this.fx.explosion.trigger(p);
+      this.audio.explosion();
+      this.cameraShake = 1;
+      this.lastGrenadeBlast = { pos: p, radius: WEAPONS.he.radius, damage: WEAPONS.he.damage };
+    }
   }
   damage(amount, hitPart) {
     if (!this.alive) return false;

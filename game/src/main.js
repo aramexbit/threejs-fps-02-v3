@@ -4,7 +4,7 @@
 // simulation at a fixed 60 Hz apart from rendering; applies a small custom
 // fullscreen post pass (vignette + grade, written from scratch — the vendored
 // core ships no examples/jsm EffectComposer); and serves the four screenshot
-// modes ?shot=start|play|buy|end&seed=N, signalling window.__shotReady once
+// modes ?shot=start|play|buy|plant|end&seed=N, signalling window.__shotReady once
 // the frame is on screen. Deterministic: every random choice is seeded.
 import * as THREE from 'three';
 import { buildMap } from './map.js';
@@ -179,15 +179,41 @@ function setupShot() {
     hud.setBuyOpen(true);
     player.pos.set(-19, 0, 0);
     player.yaw = -Math.PI / 2;
+  } else if (SHOT === 'plant') {
+    // Plant/defuse moment: advance the sim 5 s so bots are mid-push, then
+    // rewind the objective to mid-plant on site A — channel bar ~73%,
+    // furnace and foundry walls in frame.
+    player.money = 10000;
+    player.buy('ar77');
+    player.equip(player.slots.length - 1);
+    player.pos.set(-6, 0, -6);
+    player.yaw = -Math.PI / 2 - 0.12;
+    player.pitch = 0.01;
+    sim.phase = 'round';
+    sim.timer = 64;
+    for (let i = 0; i < 300; i++) sim.update(1 / 60, input);
+    sim.bombPlanted = false;
+    sim.bombSite = null;
+    sim.bombPos = null;
+    player.hasBomb = true;
+    player.pos.set(13.5, 0, -12);
+    player.yaw = -Math.PI / 2 - 0.1;
+    player.pitch = 0.0;
+    sim.plantProgress = 2.2;
+    sim.debugPlantHold = true;
   } else if (SHOT === 'end') {
-    sim.score = { solara: 4, bastion: 3 };
-    sim.round = 8;
-    sim.phase = 'end';
-    sim.timer = 3.5;
-    sim.setBanner('SOLARA WINS THE ROUND — TEAM ELIMINATED', 4);
-    player.pos.set(8, 0, -6);
-    player.yaw = -Math.PI / 2 + 0.5;
-    player.pitch = 0.03;
+    // Victory screen: match won 5–3, end overlay with the Solara roster.
+    // Hero angle: from mid-south looking east-southeast at the red lattice
+    // crane + boiler house, instead of a dark empty corner.
+    sim.score = { solara: 5, bastion: 3 };
+    sim.round = 9;
+    sim.phase = 'matchEnd';
+    sim.setBanner('SOLARA TAKES THE MATCH', 8);
+    hud.showEnd('solara', sim.score, bots);
+    if (player.viewmodel) player.viewmodel.visible = false; // cinematic: no gun in frame
+    player.pos.set(0, 0, 6);
+    player.yaw = -Math.PI / 2 - 0.35;
+    player.pitch = 0.02;
   }
   player.applyCamera(0);
 }
@@ -229,6 +255,10 @@ function frame(now) {
   for (const f of fires) f.update(dt, fx.particles);
   for (const c of chimneys) c.update(dt, fx.particles);
   snowfall.update(dt, t, player.pos.x, player.pos.z);
+  // Smoke clouds: keep emitting particles while a cloud lives.
+  for (const s of sim.smokes) {
+    fx.particles.smoke(new THREE.Vector3(s.pos.x, 0.6, s.pos.z), 2, 2.0, 0.9, 2.5);
+  }
   // Bomb mesh.
   if (sim.bombPlanted && sim.bombPos) {
     bombMesh.visible = true;

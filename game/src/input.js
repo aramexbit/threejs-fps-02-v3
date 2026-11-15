@@ -17,7 +17,7 @@ export class Input {
       if (e.repeat) return;
       this.keys.add(e.code);
       this.pressed.add(e.code);
-      if (e.code === 'KeyR' || e.code === 'KeyB' || e.code === 'KeyG' || e.code === 'KeyQ' || e.code === 'Digit1' || e.code === 'Digit2' || e.code === 'Digit3') e.preventDefault();
+      if (e.code === 'KeyR' || e.code === 'KeyB' || e.code === 'KeyG' || e.code === 'KeyQ' || e.code === 'Digit1' || e.code === 'Digit2' || e.code === 'Digit3' || e.code === 'Digit4') e.preventDefault();
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     window.addEventListener('blur', () => { this.keys.clear(); this.mouseDown = false; this.ads = false; });

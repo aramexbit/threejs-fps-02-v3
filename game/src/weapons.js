@@ -34,6 +34,14 @@ export const WEAPONS = {
     id: 'he', name: 'HE Grenade', kind: 'grenade', price: 300,
     damage: 110, radius: 6, fuse: 1.6,
   },
+  smoke: {
+    id: 'smoke', name: 'Smoke Grenade', kind: 'grenade', price: 300,
+    damage: 0, radius: 2.2, fuse: 1.6, duration: 9,
+  },
+  flash: {
+    id: 'flash', name: 'Flashbang', kind: 'grenade', price: 300,
+    damage: 0, radius: 20, fuse: 1.2, blindTime: 2.5,
+  },
 };
 
 export class Weapon {

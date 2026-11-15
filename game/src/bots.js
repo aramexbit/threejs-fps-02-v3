@@ -12,7 +12,7 @@ import { TEAM_COLORS } from './palette.js';
 const BOT_SPEED = 3.9;
 const BOT_HP = 100;
 
-function hasLOS(from, to, colliders) {
+function hasLOS(from, to, colliders, smokes = []) {
   const d = new THREE.Vector3().subVectors(to, from);
   const dist = d.length();
   if (dist < 0.01) return true;
@@ -21,7 +21,29 @@ function hasLOS(from, to, colliders) {
     const t = rayAABB(from, d, c);
     if (t < dist) return false;
   }
+  // Smoke clouds block sight: segment vs sphere.
+  for (const s of smokes) {
+    const px = s.pos.x - from.x, py = s.pos.y - from.y, pz = s.pos.z - from.z;
+    const along = Math.max(0, Math.min(dist, px * d.x + py * d.y + pz * d.z));
+    const cx = from.x + d.x * along, cy = from.y + d.y * along, cz = from.z + d.z * along;
+    if (Math.hypot(s.pos.x - cx, s.pos.y - cy, s.pos.z - cz) < s.radius) return false;
+  }
   return true;
+}
+
+// Squad roles (shown in radio callouts): Entry leads the push, Sapper plants,
+// Anchor holds a site, Roamer rotates to sound.
+const ROLES = {
+  Ash: 'Entry', Birch: 'Entry', Cinder: 'Sapper', Ember: 'Anchor',
+  Frost: 'Anchor', Glacier: 'Anchor', Hail: 'Roamer', Sleet: 'Roamer', Storm: 'Anchor',
+};
+
+function siteNameFor(pos, map) {
+  for (const key of ['A', 'B']) {
+    const c = map.sites[key].center;
+    if (Math.hypot(pos.x - c.x, pos.z - c.z) < 8) return key;
+  }
+  return 'mid';
 }
 
 export function buildBotMesh(team) {
@@ -61,7 +83,7 @@ export function buildBotMesh(team) {
 export class Bot {
   constructor(scene, map, team, name, rng, isCarrier = false) {
     this.scene = scene; this.map = map; this.team = team;
-    this.name = name; this.rng = rng;
+    this.name = name; this.role = ROLES[name] || 'Rifler'; this.rng = rng;
     this.pos = new THREE.Vector3();
     this.yaw = 0;
     this.hp = BOT_HP; this.alive = true;
@@ -73,6 +95,10 @@ export class Bot {
     this.fireTimer = 0; this.burstLeft = 0;
     this.alert = 0; // hearing alert timer
     this.alertPos = null;
+    this.blindT = 0; // flashbang blindness: cannot shoot while > 0
+    this._heardShot = false; // fresh gunshot heard -> one radio rotate call
+    this._heardSite = 'mid';
+    this._smokes = []; // active smoke clouds (set from ctx each update)
     this.channel = 0; // plant/defuse progress seconds
     this.isCarrier = isCarrier;
     this.stuckTimer = 0; this.lastPos = new THREE.Vector3();
@@ -146,10 +172,15 @@ export class Bot {
     const from = this.eye;
     const to = new THREE.Vector3(targetPos.x, targetPos.y + 1.2, targetPos.z);
     if (from.distanceTo(to) > maxDist) return false;
-    return hasLOS(from, to, this.map.colliders);
+    return hasLOS(from, to, this.map.colliders, this._smokes);
+  }
+  blind(seconds) {
+    this.blindT = seconds;
+    this.reaction = 0; this.burstLeft = 0;
   }
   hearShot(pos) {
     if (this.pos.distanceTo(pos) < 25) {
+      if (this.alert <= 0) { this._heardShot = true; this._heardSite = siteNameFor(pos, this.map); }
       this.alert = 4;
       this.alertPos = { x: pos.x, z: pos.z };
     }
@@ -165,8 +196,15 @@ export class Bot {
   update(dt, ctx) {
     if (!this.alive) return;
     const player = ctx.player;
+    this._smokes = ctx.smokes || [];
+    this.blindT = Math.max(0, this.blindT - dt);
     this.retargetTimer -= dt;
     this.alert = Math.max(0, this.alert - dt);
+    // Fresh gunshot heard: one radio rotate call (throttled in sim).
+    if (this._heardShot && this.alert > 0) {
+      this._heardShot = false;
+      ctx.onRadio(this, `Heard shots ${this._heardSite} — rotating.`);
+    }
     // --- Perception ----------------------------------------------------------
     let enemy = null; // {pos, isPlayer, bot}
     if (player.alive && player.pos.distanceTo(this.pos) < 32 && this.canSee(player.pos)) {
@@ -177,7 +215,10 @@ export class Bot {
         if (b.pos.distanceTo(this.pos) < 30 && this.canSee(b.pos)) { enemy = { pos: b.pos, bot: b }; break; }
       }
     }
-    if (enemy && this.reaction <= 0) this.reaction = 0.25 + this.rng() * 0.35;
+    if (enemy && this.reaction <= 0) {
+      this.reaction = 0.25 + this.rng() * 0.35;
+      ctx.onRadio(this, `Contact ${siteNameFor(enemy.pos, this.map)} — ${enemy.isPlayer ? 'one hostile!' : 'enemy spotted!'}`);
+    }
     if (!enemy) this.reaction = Math.max(0, this.reaction - dt);
     // --- Objective state ------------------------------------------------------
     const sitePos = this.site && ctx.map.sites[this.site] ? ctx.map.sites[this.site].center : null;
@@ -216,6 +257,7 @@ export class Bot {
     if (this.state === 'plant' && this.goal) {
       const d = Math.hypot(this.goal.x - this.pos.x, this.goal.z - this.pos.z);
       if (d < 1.5 && !enemy) {
+        if (this.channel === 0) ctx.onRadio(this, `Planting ${this.site}!`);
         this.channel += dt;
         if (this.channel >= 3) { this.channel = 0; ctx.onPlant(this); }
         // Stand still while planting.
@@ -228,6 +270,7 @@ export class Bot {
       const bs = ctx.map.sites[ctx.bombSite].center;
       const d = Math.hypot(bs.x - this.pos.x, bs.z - this.pos.z);
       if (d < 2.5 && !enemy) {
+        if (this.channel === 0) ctx.onRadio(this, 'Defusing the bomb!');
         this.channel += dt;
         if (this.channel >= 5) { this.channel = 0; ctx.onDefuse(this); }
         this._syncMesh(dt);
@@ -245,8 +288,8 @@ export class Bot {
       // Strafe slightly while engaging instead of walking into the open.
       this.yaw = Math.atan2(-(enemy.pos.x - this.pos.x), -(enemy.pos.z - this.pos.z)) + Math.PI;
     }
-    // --- Combat ------------------------------------------------------------------
-    if (enemy) {
+    // --- Combat (blinded bots cannot shoot) --------------------------------------
+    if (enemy && this.blindT <= 0) {
       this.state = 'engage';
       const to = enemy.pos;
       this.yaw = Math.atan2(-(to.x - this.pos.x), -(to.z - this.pos.z)) + Math.PI;

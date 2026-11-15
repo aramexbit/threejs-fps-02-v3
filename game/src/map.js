@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import { mulberry32 } from './rng.js';
 import {
   concreteTextures, containerTextures, hazardTextures, rockTextures,
-  sandbagTextures, snowTextures, woodTextures, siteLetterTexture,
+  sandbagTextures, snowTextures, woodTextures, siteLetterTexture, siteSignTexture,
 } from './textures.js';
 
 export const MAP = { w: 44, h: 36, halfW: 22, halfH: 18 };
@@ -388,6 +388,29 @@ export function buildMap(scene) {
     addCollider(x, z, 0.2, 0.2, 5.5);
   }
 
+  // --- Mid-lane rubble: break up the flat snow --------------------------------
+  // Small dark chunks + a few tilted rebar bars along the mid service road
+  // (Gemini v3.3 re-review: the open snow reads as a flat test floor).
+  // Seeded, non-collidable on purpose — they sit off the waypoint lanes
+  // (z = ±2..5, never on the z = 0 / ±6 / ±12 lines bots walk).
+  {
+    const mRnd = mulberry32(777);
+    for (let i = 0; i < 10; i++) {
+      const rx = -14 + mRnd() * 28;
+      const rz = (mRnd() < 0.5 ? -1 : 1) * (2 + mRnd() * 3);
+      const chunk = new THREE.Mesh(new THREE.DodecahedronGeometry(0.12 + mRnd() * 0.22, 0), i % 2 ? rockMat : concMat);
+      chunk.position.set(rx, 0.1, rz);
+      chunk.rotation.set(mRnd() * Math.PI, mRnd() * Math.PI, mRnd() * Math.PI);
+      chunk.castShadow = true; chunk.receiveShadow = true;
+      group.add(chunk);
+      if (i % 3 === 0) {
+        const bar = cylAt(steelMat, 0.012, 0.012, 0.7 + mRnd() * 0.4, rx, 0.3, rz, 6);
+        bar.rotation.set((mRnd() - 0.5) * 1.4, 0, (mRnd() - 0.5) * 1.4);
+        group.add(bar);
+      }
+    }
+  }
+
   // --- Site letters painted on the snow --------------------------------------------
   const letter = (ch, x, z) => {
     const m = new THREE.Mesh(
@@ -401,6 +424,28 @@ export function buildMap(scene) {
   };
   letter('A', SITES.A.center.x - 1, SITES.A.center.z + 1);
   letter('B', SITES.B.center.x - 1, SITES.B.center.z - 1);
+
+  // --- Site sign boards: "SITE A — FOUNDRY" / "SITE B — CRANE YARD" ---------
+  // Standing boards just off the west lane into each site, facing the Solara
+  // spawn so attackers read them on approach. Off-lane (z = ∓15.5) and
+  // collider-free on purpose: a collider here would sit on the bot waypoint
+  // lane (8,∓12)-(13,∓12) and stall pushes.
+  const sign = (key, x, z) => {
+    const tex = siteSignTexture(key, SITES[key].name);
+    const panel = new THREE.Mesh(
+      new THREE.PlaneGeometry(3.6, 1.35),
+      new THREE.MeshStandardMaterial({ map: tex, side: THREE.DoubleSide, roughness: 0.6, metalness: 0.4 }),
+    );
+    panel.position.set(x, 2.1, z);
+    panel.rotation.y = -Math.PI / 2; // face west, toward the attackers
+    panel.castShadow = true;
+    group.add(panel);
+    for (const dz of [-1.55, 1.55]) {
+      group.add(boxAt(darkSteel, 0.12, 2.1, 0.12, x, 1.05, z + dz));
+    }
+  };
+  sign('A', 10.5, -15.5);
+  sign('B', 10.5, 15.5);
 
   scene.add(group);
 

@@ -19,9 +19,23 @@
   .timer { position: absolute; top: 44px; left: 50%; transform: translateX(-50%); font-size: 26px; font-weight: 800; text-shadow: 0 2px 8px rgba(0,0,0,.8); }
   .timer.urgent { color: #ff5a4e; }
   .bomb-status { position: absolute; top: 78px; left: 50%; transform: translateX(-50%); font-size: 13px; font-weight: 700; color: #ffd24a; text-shadow: 0 2px 6px rgba(0,0,0,.8); }
+  /* Team alive pips */
+  .pips { position: absolute; top: 104px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 4px; align-items: center; }
+  .pips-sol i, .pips-bas i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin: 0 2px; box-shadow: 0 1px 4px rgba(0,0,0,.7); }
+  .pips-sol i { background: #ff7a2f; } .pips-bas i { background: #6fc3d8; }
+  .pips-sol i.dead, .pips-bas i.dead { background: #3a4450; opacity: .55; }
   /* Kill feed */
   .feed { position: absolute; top: 14px; right: 16px; text-align: right; font-size: 13px; font-weight: 600; }
   .feed-item { background: rgba(13,17,23,.72); border-right: 3px solid #ff7a2f; padding: 4px 9px; margin-bottom: 5px; border-radius: 3px; }
+  .feed-item.feed-hs { border-right-color: #ff2f2f; background: rgba(60,16,12,.8); }
+  .feed-weapon { color: #ffb347; }
+  .feed-hs-tag { color: #ff5a4e; font-weight: 800; }
+  /* Team chat / radio */
+  .chat { position: absolute; left: 16px; bottom: 92px; font-size: 13px; font-weight: 600; max-width: 430px; }
+  .chat-item { background: rgba(13,17,23,.66); border-left: 3px solid #ff7a2f; padding: 4px 9px; margin-bottom: 4px; border-radius: 3px; text-shadow: 0 1px 3px rgba(0,0,0,.8); }
+  .chat-item.chat-bas { border-left-color: #6fc3d8; }
+  /* Flashbang overlay */
+  .flashfx { position: absolute; inset: 0; background: #fff; opacity: 0; transition: opacity 1.2s; pointer-events: none; }
   /* Banner */
   .banner { position: absolute; top: 30%; left: 50%; transform: translate(-50%, -50%); font-size: 30px; font-weight: 900; letter-spacing: .08em; text-align: center; text-shadow: 0 3px 14px rgba(0,0,0,.9); color: #ffb347; white-space: nowrap; }
   /* Crosshair */
@@ -34,13 +48,18 @@
   .cross.ads i { opacity: .35; }
   .hitmarker { position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; display: none; }
   /* Bottom-left */
-  .bl { position: absolute; left: 16px; bottom: 16px; }
+  .bl { position: absolute; left: 16px; bottom: 16px; background: rgba(13,17,23,.55); padding: 8px 12px 8px 10px; border-radius: 6px; }
   .hpbar { width: 220px; height: 12px; background: rgba(13,17,23,.7); border: 1px solid #4a5568; border-radius: 3px; overflow: hidden; }
   .hpfill { height: 100%; width: 100%; background: #6fc3d8; }
   .hptext { margin-top: 5px; font-weight: 800; font-size: 15px; text-shadow: 0 2px 6px rgba(0,0,0,.8); }
   .money { margin-top: 3px; font-size: 15px; font-weight: 800; color: #ffd24a; text-shadow: 0 2px 6px rgba(0,0,0,.8); }
   /* Bottom-right ammo */
-  .br { position: absolute; right: 20px; bottom: 14px; text-align: right; }
+  .br { position: absolute; right: 20px; bottom: 14px; text-align: right; background: rgba(13,17,23,.55); padding: 8px 12px; border-radius: 6px; }
+  .slots { display: flex; gap: 5px; justify-content: flex-end; margin-bottom: 6px; }
+  .slot { font-size: 11px; font-weight: 800; color: #9aa8b8; background: rgba(13,17,23,.7); border: 1px solid #4a5568; border-radius: 3px; padding: 3px 7px; }
+  .slot-active { color: #ffb347; border-color: #ffb347; background: rgba(42,32,19,.85); }
+  .slot-empty { opacity: .45; }
+  .slot-bomb { color: #ffd24a; border-color: #ffd24a; }
   .ammo { font-size: 44px; font-weight: 900; line-height: 1; text-shadow: 0 3px 10px rgba(0,0,0,.85); }
   .ammo span { font-size: 22px; color: #9aa8b8; }
   .wname { font-size: 14px; font-weight: 700; color: #9aa8b8; margin-top: 2px; }
@@ -51,16 +70,23 @@
   .channellabel { font-size: 13px; font-weight: 800; letter-spacing: .1em; margin-top: 5px; text-shadow: 0 2px 6px #000; }
   .damagefx { position: absolute; inset: 0; box-shadow: inset 0 0 90px 30px rgba(224,60,50,.55); opacity: 0; transition: opacity .25s; }
   /* Buy menu */
-  .buy { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 380px; background: rgba(13,17,23,.92); border: 1px solid #4a5568; border-radius: 8px; padding: 18px; pointer-events: auto; }
+  .buy-backdrop { position: absolute; inset: 0; background: rgba(10,13,18,.5); pointer-events: auto; }
+  .buy { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 470px; background: rgba(13,17,23,.92); border: 1px solid #4a5568; border-radius: 8px; padding: 18px; pointer-events: auto; }
   .buy-title { font-size: 20px; font-weight: 900; letter-spacing: .06em; color: #ffb347; margin-bottom: 4px; }
   .buy-money { font-size: 15px; font-weight: 800; color: #ffd24a; margin-bottom: 10px; }
-  .buy-item { display: flex; justify-content: space-between; width: 100%; padding: 9px 12px; margin-bottom: 6px; background: #1c222b; color: #eef2f6; border: 1px solid #4a5568; border-radius: 5px; font-size: 15px; font-weight: 700; cursor: pointer; }
+  .buy-section { font-size: 12px; font-weight: 900; letter-spacing: .14em; color: #6fc3d8; margin: 10px 0 5px; }
+  .buy-item { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; width: 100%; padding: 9px 12px; margin-bottom: 6px; background: #1c222b; color: #eef2f6; border: 1px solid #4a5568; border-radius: 5px; font-size: 15px; font-weight: 700; cursor: pointer; }
   .buy-item:hover { border-color: #ffb347; background: #2a2013; }
+  .buy-item.buy-owned { opacity: .55; }
+  .buy-name { text-align: left; }
+  .buy-stats { flex: 1; text-align: right; font-size: 12px; font-weight: 600; color: #9aa8b8; }
+  .buy-price { color: #ffd24a; }
   .buy-hint { font-size: 12px; color: #9aa8b8; margin-top: 8px; }
   /* Overlays */
   .overlay { position: absolute; inset: 0; background: rgba(10, 13, 18, .78); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; pointer-events: auto; }
   .overlay h1 { font-size: 64px; letter-spacing: .14em; margin: 0; color: #eef2f6; text-shadow: 0 4px 24px rgba(0,0,0,.8); }
   .overlay .sub { font-size: 17px; color: #ffb347; font-weight: 700; margin: 10px 0 4px; }
+  .overlay .roster { font-size: 14px; color: #9aa8b8; font-weight: 600; margin: 6px 0 4px; }
   .overlay .controls { font-size: 14px; color: #9aa8b8; line-height: 1.7; }
   .overlay .cta { font-size: 20px; font-weight: 900; letter-spacing: .12em; color: #6fc3d8; animation: pulse 1.6s infinite; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }

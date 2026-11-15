@@ -355,3 +355,40 @@ export function siteLetterTexture(letter) {
   t.anisotropy = 4;
   return t;
 }
+
+// Site sign board: dark steel plate, hazard stripe top, big site letter +
+// site name ("SITE A — FOUNDRY"). Canvas 512x192, used on a double-sided
+// plane mounted on two posts at each site entrance.
+export function siteSignTexture(letter, name) {
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 192;
+  const g = c.getContext('2d');
+  g.fillStyle = '#23262b';
+  g.fillRect(0, 0, 512, 192);
+  // Hazard stripe along the top edge.
+  g.save();
+  g.beginPath(); g.rect(0, 0, 512, 26); g.clip();
+  for (let x = -26; x < 512; x += 52) {
+    g.fillStyle = '#ffb347';
+    g.beginPath();
+    g.moveTo(x, 26); g.lineTo(x + 26, 0); g.lineTo(x + 52, 0); g.lineTo(x + 26, 26);
+    g.closePath(); g.fill();
+  }
+  g.restore();
+  g.strokeStyle = '#4a5568'; g.lineWidth = 4;
+  g.strokeRect(3, 3, 506, 186);
+  g.fillStyle = letter === 'A' ? '#ff7a2f' : '#6fc3d8';
+  g.font = 'bold 92px system-ui, sans-serif';
+  g.textAlign = 'left'; g.textBaseline = 'middle';
+  g.fillText(letter, 28, 112);
+  g.fillStyle = '#eef2f6';
+  g.font = 'bold 44px system-ui, sans-serif';
+  g.fillText(`SITE ${letter}`, 118, 82);
+  g.fillStyle = '#9aa8b8';
+  g.font = 'bold 30px system-ui, sans-serif';
+  g.fillText(name.toUpperCase(), 118, 132);
+  const t = new THREE.CanvasTexture(c);
+  t.anisotropy = 4;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}

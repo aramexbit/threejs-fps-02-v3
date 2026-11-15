@@ -33,6 +33,11 @@ export class Sim {
     this.time = 0;
     this.banner = '';
     this.bannerT = 0;
+    this.smokes = []; // active smoke clouds {pos, radius, until} — block bot LOS
+    this.radioT = -99; // last radio line (global throttle)
+    this.radioPerBot = new Map(); // bot name -> last line time
+    this.defuseTime = 5; // 2.5 s with a defuse kit
+    this.debugPlantHold = false; // shot mode: pretend E is held for the plant shot
   }
   get aliveBots() { return this.bots.filter((b) => b.alive); }
   teamAlive(team) {
@@ -69,7 +74,7 @@ export class Sim {
     p.hp = 100; p.alive = true; p.armor = p.armor; // armor carries over
     for (const w of p.slots) { w.ammo = w.def.mag; w.reserve = w.def.reserve; w.reloading = 0; }
     p.hasBomb = true;
-    p.grenades = Math.max(p.grenades, 0);
+    // Utility counts + armor + defuse kit carry across rounds.
     this.bombCarrier = null;
     // Bots: 4 Solara friends + 5 Bastion. Sites: A 40% / mid 25% / B 35%.
     const solaraBots = this.bots.filter((b) => b.team === 'solara');
@@ -94,6 +99,25 @@ export class Sim {
       b.wp = b.nearestWaypoint();
     });
     this.setBanner(`ROUND ${this.round} — ${this.round === 1 ? 'FROSTLINE' : 'BUY PHASE'}`, 3);
+    // Round-start plan callout from a Solara bot (throttle reset each round).
+    this.radioT = -99; this.radioPerBot.clear();
+    const caller = this.bots.find((b) => b.team === 'solara' && b.alive);
+    if (caller) {
+      const site = caller.site || 'A';
+      this.radio(caller, this.rng() < 0.5
+        ? `Pushing ${site} — follow me, watch the lanes.`
+        : `Rush ${site} together. ${site === 'A' ? 'Foundry' : 'Crane Yard'} — go go go.`, true);
+    }
+  }
+  // Radio callout: throttled (4 s global, 12 s per bot) unless forced.
+  radio(bot, line, force = false) {
+    if (!force) {
+      if (this.time - this.radioT < 4) return;
+      if (this.time - (this.radioPerBot.get(bot.name) ?? -99) < 12) return;
+    }
+    this.radioT = this.time;
+    this.radioPerBot.set(bot.name, this.time);
+    this.events.push({ type: 'radio', text: `${bot.name} [${bot.role}]: ${line}`, team: bot.team });
   }
   setBanner(text, dur = 3) {
     this.banner = text; this.bannerT = dur;
@@ -128,20 +152,22 @@ export class Sim {
   // --- Bomb ----------------------------------------------------------------------
   tryPlantOrDefuse(dt, input) {
     const p = this.player;
+    this.defuseTime = p.hasKit ? 2.5 : 5;
+    const held = input.plantHeld || this.debugPlantHold;
     if (this.phase !== 'round' || !p.alive) { this.plantProgress = 0; this.defuseProgress = 0; return; }
     if (!this.bombPlanted && p.hasBomb) {
       const site = this._playerSite();
-      if (site && input.plantHeld) {
+      if (site && held) {
         this.plantProgress += dt;
         if (Math.floor(this.plantProgress * 4) !== Math.floor((this.plantProgress - dt) * 4)) this.audio.beep();
         if (this.plantProgress >= 3) this._plant(site);
       } else this.plantProgress = 0;
     } else if (this.bombPlanted && this.bombPos) {
       const d = Math.hypot(p.pos.x - this.bombPos.x, p.pos.z - this.bombPos.z);
-      if (d < 2.5 && input.plantHeld) {
+      if (d < 2.5 && held) {
         this.defuseProgress += dt;
         if (Math.floor(this.defuseProgress * 4) !== Math.floor((this.defuseProgress - dt) * 4)) this.audio.beep();
-        if (this.defuseProgress >= 5) this._defuse();
+        if (this.defuseProgress >= this.defuseTime) this._defuse();
       } else this.defuseProgress = 0;
     }
   }
@@ -181,12 +207,12 @@ export class Sim {
   onBotPlant(bot) {
     if (this.bombPlanted || this.phase !== 'round' || !this.map.sites[bot.site]) return;
     this._plant(bot.site);
-    this.events.push({ type: 'killfeed', text: `${bot.name} planted the bomb` });
+    this.radio(bot, `Bomb planted ${bot.site} — hold the site!`, true);
   }
   onBotDefuse(bot) {
     if (!this.bombPlanted) return;
     this.bombPlanted = false;
-    this.events.push({ type: 'killfeed', text: `${bot.name} defused the bomb` });
+    this.radio(bot, `Bomb defused — site ${this.bombSite} clear.`, true);
     this.endRound('bastion', 'BOMB DEFUSED');
   }
 
@@ -234,7 +260,10 @@ export class Sim {
       if (killed) {
         this.audio.kill();
         this.player.money += 300;
-        this.events.push({ type: 'killfeed', text: `You ▸ ${best.bot.name} (${best.part})` });
+        this.events.push({
+          type: 'killfeed', killer: 'You', victim: best.bot.name,
+          weapon: weapon.def.name, headshot: best.part === 'head',
+        });
         if (best.bot.isCarrier) {
           // Bomb drops to the nearest alive Solara bot.
           const next = this.bots.find((b) => b.alive && b.team === 'solara');
@@ -274,7 +303,10 @@ export class Sim {
       const died = this.player.damage(bot.damage, 'torso');
       this.events.push({ type: 'damage', amount: bot.damage });
       if (died) {
-        this.events.push({ type: 'killfeed', text: `${bot.name} ▸ You` });
+        this.events.push({
+          type: 'killfeed', killer: bot.name, victim: 'You',
+          weapon: WEAPONS[bot.weapon].name, headshot: false,
+        });
         // Bomb drops to a Solara bot.
         if (this.player.hasBomb) {
           this.player.hasBomb = false;
@@ -288,7 +320,10 @@ export class Sim {
     } else if (enemy.bot) {
       const died = enemy.bot.damage(bot.damage);
       if (died) {
-        this.events.push({ type: 'killfeed', text: `${bot.name} ▸ ${enemy.bot.name}` });
+        this.events.push({
+          type: 'killfeed', killer: bot.name, victim: enemy.bot.name,
+          weapon: WEAPONS[bot.weapon].name, headshot: false,
+        });
         if (enemy.bot.team === 'solara' && this.teamAlive('solara') === 0 && !this.bombPlanted) {
           this.endRound('bastion', 'TEAM ELIMINATED');
         }
@@ -303,6 +338,33 @@ export class Sim {
   update(dt, input) {
     this.time += dt;
     this.bannerT = Math.max(0, this.bannerT - dt);
+    // Smoke clouds from the player's smoke grenades (block bot LOS).
+    if (this.player.lastSmoke) {
+      const s = this.player.lastSmoke;
+      this.player.lastSmoke = null;
+      this.smokes.push({ pos: s.pos, radius: s.radius, until: this.time + s.duration });
+    }
+    this.smokes = this.smokes.filter((s) => s.until > this.time);
+    // Flashbang pop: blind bots with line of sight, flash the player if
+    // they are looking toward it.
+    if (this.player.lastFlash) {
+      const f = this.player.lastFlash;
+      this.player.lastFlash = null;
+      for (const b of this.bots) {
+        if (!b.alive) continue;
+        if (b.pos.distanceTo(f.pos) < f.radius && b.canSee(f.pos)) b.blind(f.blindTime);
+      }
+      const p = this.player;
+      const eye = new THREE.Vector3(p.pos.x, p.eyeY, p.pos.z);
+      const toFlash = f.pos.clone().sub(eye);
+      const dist = toFlash.length();
+      const dir = new THREE.Vector3(0, 0, -1)
+        .applyEuler(new THREE.Euler(p.pitch, p.yaw, 0, 'YXZ'));
+      const facing = dist > 0.01 ? toFlash.normalize().dot(dir) : 0;
+      const strength = dist < f.radius && facing > 0.2
+        ? Math.min(1, 0.4 + facing * 0.6 * (1 - dist / (f.radius * 1.5))) : 0;
+      this.events.push({ type: 'flash', strength });
+    }
     // Grenade blast damage (set by player._explodeGrenade).
     if (this.player.lastGrenadeBlast) {
       const blast = this.player.lastGrenadeBlast;
@@ -314,7 +376,10 @@ export class Sim {
           const died = b.damage(Math.round(blast.damage * (1 - d / blast.radius)));
           if (died) {
             this.player.money += 300;
-            this.events.push({ type: 'killfeed', text: `You ▸ ${b.name} (HE)` });
+            this.events.push({
+              type: 'killfeed', killer: 'You', victim: b.name,
+              weapon: 'HE', headshot: false,
+            });
           }
         }
       }
@@ -365,6 +430,7 @@ export class Sim {
       }
       if (input.consume('KeyR')) { if (p.weapon.startReload()) this.audio.reload(); }
       if (input.consume('KeyG')) p.throwGrenade(this.time);
+      if (input.consume('Digit4')) p.cycleGrenade();
       if (input.consume('KeyQ')) p.equip((p.slot + 1) % p.slots.length);
       if (input.consume('Digit1')) p.equip(0);
       if (input.consume('Digit2') && p.slots.length > 1) p.equip(1);
@@ -379,9 +445,11 @@ export class Sim {
       player: p, bots: this.bots, map: this.map,
       bombPlanted: this.bombPlanted, bombSite: this.bombSite,
       time: this.time,
+      smokes: this.smokes,
       siteClear: (site) => this.siteClear(site),
       onPlant: (bot) => this.onBotPlant(bot),
       onDefuse: (bot) => this.onBotDefuse(bot),
+      onRadio: (bot, line, force) => this.radio(bot, line, force),
       onBotShot: (bot, enemy, hit, dist) => this.onBotShot(bot, enemy, hit, dist),
     };
     for (const b of this.bots) b.update(dt, ctx);

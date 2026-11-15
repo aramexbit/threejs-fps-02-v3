@@ -110,14 +110,17 @@ export function snowTextures(seed = 11, size = 512) {
       const drift = fbm(u * 5, v * 5, 5, seed, 4);
       const fine = vnoise(u * 48, v * 48, 48, seed + 3);
       const dirt = fbm(u * 3 + 9, v * 3, 3, seed + 5, 3);
+      // v3.4: soft large-scale mottling (wind-blown grey-blue patches) so
+      // the snow is not one flat white sheet. ±7 shade, snow stays bright.
+      const blotch = fbm(u * 2 + 31, v * 2 + 17, 2, seed + 9, 3);
       // Two tyre ruts running vertically (the service road), packed + dirty.
       const rut = Math.max(0, 1 - Math.abs(u - 0.30) / 0.04) + Math.max(0, 1 - Math.abs(u - 0.70) / 0.04);
-      const shade = 232 + drift * 20 + fine * 8 - dirt * 26 - rut * 55;
+      const shade = 232 + drift * 20 + fine * 8 - dirt * 26 - rut * 55 + (blotch - 0.5) * 14;
       img.data[i * 4] = shade;
       img.data[i * 4 + 1] = shade + 2;
-      img.data[i * 4 + 2] = Math.min(255, shade + 8 - dirt * 6);
+      img.data[i * 4 + 2] = Math.min(255, shade + 8 - dirt * 6 + (blotch - 0.5) * 10);
       img.data[i * 4 + 3] = 255;
-      height[i] = drift * 0.5 + fine * 0.2 - rut * 0.18;
+      height[i] = drift * 0.5 + fine * 0.2 - rut * 0.18 + (blotch - 0.5) * 0.06;
       ao[i] = 0.86 + drift * 0.14 - rut * 0.18;
       rough[i] = 0.9; metal[i] = 0.0;
     }

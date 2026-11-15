@@ -5,7 +5,7 @@
 // non-collidable and never blocks a path). Waypoints form a graph the bots
 // walk; edges are built with a segment-vs-AABB line-of-sight test.
 import * as THREE from 'three';
-import { mulberry32 } from './rng.js';
+import { fbm, mulberry32 } from './rng.js';
 import {
   concreteTextures, containerTextures, hazardTextures, rockTextures,
   sandbagTextures, snowTextures, woodTextures, siteLetterTexture, siteSignTexture,
@@ -33,6 +33,23 @@ function cylAt(mat, rt, rb, h, x, y, z, seg = 12) {
   m.position.set(x, y, z);
   m.castShadow = true; m.receiveShadow = true;
   return m;
+}
+
+// Displace a geometry's vertices radially with tileable fbm noise —
+// breaks the perfect sphere/icosahedron silhouette. The noise is a
+// function of position, so duplicated seam vertices move identically
+// and no cracks open up.
+function displace(geo, amt, seed) {
+  const pos = geo.attributes.position;
+  const v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i);
+    const n = fbm(v.x * 0.12 + seed * 3.1, v.z * 0.12 + seed * 1.7, 8, seed, 3);
+    v.multiplyScalar(1 + (n - 0.5) * 2 * amt);
+    pos.setXYZ(i, v.x, v.y, v.z);
+  }
+  geo.computeVertexNormals();
+  return geo;
 }
 
 // Segment (x0,z0)-(x1,z1) blocked by any AABB? (2D test, used for waypoints.)
@@ -90,6 +107,8 @@ export function buildMap(scene) {
   const barkMat = std({ color: 0x4a3a28, roughness: 0.95, metalness: 0 });
   const leafMat = std({ color: 0xc96a24, roughness: 0.9, metalness: 0 });
   const grassMat = std({ color: 0x8a713c, roughness: 0.95, metalness: 0, side: THREE.DoubleSide }); // v3.2: darker, less cardboard-orange (was 0x9a7d46)
+  const pineMat = std({ color: 0x2e4d33, roughness: 0.95, metalness: 0 }); // v3.4: dark pine green
+  const snowWhite = std({ color: 0xe8edf2, roughness: 0.9, metalness: 0 }); // v3.4: snow-tipped pine tops
 
   // --- Ground ----------------------------------------------------------------
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(MAP.w + 30, MAP.h + 30), snowMat);
@@ -350,6 +369,160 @@ export function buildMap(scene) {
     group.add(r);
     addCollider(x, z, s * 0.8, s * 0.8, s);
   }
+
+  // --- v3.4 organic shapes pass ------------------------------------------------
+  // The world was almost all boxes on a flat plane. This pass adds curved
+  // and displaced forms WITHOUT touching gameplay: everything new is either
+  // outside the walls, piled against a wall base, on top of a building, or
+  // a collider hugging an existing one. New in-bounds colliders were
+  // link-checked against the bot waypoint graph (39 links before and
+  // after, none cut).
+
+  // Snow hills outside the compound: tall enough (2.6–3.6 m) to read over
+  // the 2.2 m walls. Squashed displaced spheres, centres at ground level.
+  const hillSpots = [
+    [0, -26, 6, 0.5], [-16, -25, 5, 0.55], [16, -26, 5.5, 0.5],
+    [-8, 26, 6, 0.5], [12, 27, 5, 0.55],
+    [-29, -6, 5, 0.55], [-29, 10, 4.5, 0.6],
+    [29, -8, 5, 0.55], [28, 12, 5, 0.5],
+  ];
+  {
+    const hRnd = mulberry32(3401);
+    for (const [x, z, r, sy] of hillSpots) {
+      const geo = displace(new THREE.SphereGeometry(r, 20, 14), 0.22, Math.floor(hRnd() * 1000));
+      const hill = new THREE.Mesh(geo, snowMat);
+      hill.scale.set(1, sy, 0.9);
+      hill.position.set(x, 0, z);
+      hill.castShadow = true; hill.receiveShadow = true;
+      group.add(hill);
+    }
+  }
+
+  // Low drifts banked against the inside wall bases (soft snow, no
+  // colliders — a player stepping on a drift edge is snow, not a wall).
+  const driftSpots = [
+    [-14, -17.3, 2.2, 0.3], [-4, -17.5, 1.8, 0.35], [6, -17.2, 2.0, 0.3], [-19, -17.3, 2.4, 0.3],
+    [-12, 17.3, 2.0, 0.35], [2, 17.4, 2.2, 0.3], [14, 17.2, 1.9, 0.3],
+    [-21.3, -10, 1.8, 0.35], [-21.3, 10, 2.0, 0.3], [21.3, 2, 1.8, 0.35],
+  ];
+  {
+    const dRnd = mulberry32(3402);
+    for (const [x, z, r, sy] of driftSpots) {
+      const geo = displace(new THREE.SphereGeometry(r, 16, 10), 0.25, Math.floor(dRnd() * 1000));
+      const drift = new THREE.Mesh(geo, snowMat);
+      drift.scale.set(1, sy, 0.85);
+      drift.position.set(x, 0, z);
+      drift.receiveShadow = true;
+      group.add(drift);
+    }
+  }
+
+  // Displaced-icosahedron rocks (the old rocks are plain dodecahedrons).
+  // Big ones outside the walls; in-bounds ones hug the edges outside the
+  // waypoint box (x ±20 / z ±12); two sit near container cover.
+  const newRocks = [
+    // [x, z, r, solid]
+    [-27, -16, 2.2, false], [27, 2, 2.6, false], [6, -27, 2.4, false],
+    [-21, -14.5, 1.1, true], [21, 14.5, 1.2, true], [-21, 15.5, 0.9, true], [-6, 16.8, 1.0, true],
+    [5.6, 9.5, 0.7, true], [-5.6, 8, 0.7, true],
+  ];
+  {
+    const kRnd = mulberry32(3403);
+    for (const [x, z, r, solid] of newRocks) {
+      const geo = displace(new THREE.IcosahedronGeometry(r, 1), 0.3, Math.floor(kRnd() * 1000));
+      const rock = new THREE.Mesh(geo, rockMat);
+      rock.position.set(x, r * 0.45, z);
+      rock.rotation.set(kRnd() * 0.6, kRnd() * Math.PI, kRnd() * 0.6);
+      rock.scale.y = 0.7;
+      rock.castShadow = true; rock.receiveShadow = true;
+      group.add(rock);
+      if (solid) addCollider(x, z, r * 0.8, r * 0.8, r);
+    }
+  }
+
+  // Pine trees: trunk + 3 stacked cones, snow-tipped top cone. Tall ones
+  // outside the walls read over them; three in-bounds pines sit in the
+  // corners, outside the waypoint box, with colliders.
+  const pine = (x, z, s, solid) => {
+    const g = new THREE.Group();
+    g.position.set(x, 0, z);
+    g.add(cylAt(barkMat, 0.12 * s, 0.2 * s, 1.6 * s, 0, 0.8 * s, 0, 8));
+    for (const [r, h, y, mat] of [
+      [1.5, 2.2, 1.6, pineMat], [1.1, 1.9, 3.0, pineMat], [0.7, 1.6, 4.3, snowWhite],
+    ]) {
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(r * s, h * s, 10), mat);
+      cone.position.y = y * s;
+      cone.castShadow = true; cone.receiveShadow = true;
+      g.add(cone);
+    }
+    group.add(g);
+    if (solid) addCollider(x, z, 0.3, 0.3, 6 * s);
+  };
+  pine(-27, -4, 1.1, false); pine(-28, 16, 1.3, false); pine(27, -16, 1.2, false);
+  pine(28, 6, 1.3, false); pine(-6, -27, 1.1, false); pine(18, 27, 1.3, false); pine(-16, 27, 1.2, false);
+  pine(-20.8, -16.8, 1.0, true); pine(20.8, 16.8, 1.0, true); pine(-20.8, 16.8, 1.1, true);
+
+  // Cylindrical silos with domed tops, outside the east/west walls and
+  // tall enough to read over them.
+  const silo = (x, z, r, h) => {
+    group.add(cylAt(steelMat, r, r, h, x, h / 2, z, 18));
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(r, 18, 8, 0, Math.PI * 2, 0, Math.PI / 2), darkSteel);
+    dome.position.set(x, h, z);
+    dome.castShadow = true; dome.receiveShadow = true;
+    group.add(dome);
+    group.add(cylAt(darkSteel, r + 0.08, r + 0.08, 0.25, x, 0.12, z, 18)); // base ring
+  };
+  silo(25.5, -12, 1.8, 5.5);
+  silo(25.5, 8, 1.5, 4.5);
+  silo(-25.5, -2, 1.8, 5.5);
+
+  // Pipes running along the perimeter wall crowns (above head height, on
+  // the wall tops — no collider needed).
+  const crownPipe = (x, z, len, alongZ) => {
+    const p = cylAt(steelMat, 0.18, 0.18, len, x, 2.32, z, 10);
+    if (alongZ) p.rotation.x = Math.PI / 2;
+    else p.rotation.z = Math.PI / 2;
+    group.add(p);
+  };
+  crownPipe(0, -18.6, 44, false);
+  crownPipe(0, 18.6, 44, false);
+  crownPipe(-22.6, 0, 36, true);
+  crownPipe(22.6, 0, 36, true);
+
+  // Sloped roofs on the two flat-roofed buildings (foundry + boiler
+  // house). Triangle profile extruded along the ridge. Containers keep
+  // their flat snow caps — a pitched roof on a shipping container would
+  // read wrong, so there is no third roof.
+  const prismRoof = (x, y, z, base, height, len) => {
+    const shape = new THREE.Shape();
+    shape.moveTo(-base / 2, 0);
+    shape.lineTo(base / 2, 0);
+    shape.lineTo(0, height);
+    shape.closePath();
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: len, bevelEnabled: false });
+    const roof = new THREE.Mesh(geo, steelMat);
+    roof.rotation.y = -Math.PI / 2; // extrusion -> world X, shape X -> world Z
+    roof.position.set(x + len / 2, y, z);
+    roof.castShadow = true; roof.receiveShadow = true;
+    group.add(roof);
+  };
+  prismRoof(15, 4.5, -12, 9.6, 2.4, 9.4); // foundry
+  prismRoof(18.5, 4, 14, 5.4, 1.8, 6.4); // boiler house
+
+  // Barrel clusters pressed against container faces (colliders hug the
+  // existing container colliders — link-checked, no lane cut).
+  const barrelCluster = (spots, seed) => {
+    const bRnd = mulberry32(seed);
+    for (const [x, z] of spots) {
+      const barrel = cylAt(bRnd() < 0.5 ? steelMat : darkSteel, 0.32, 0.32, 0.85, x, 0.43, z, 12);
+      group.add(barrel);
+      group.add(cylAt(darkSteel, 0.33, 0.33, 0.06, x, 0.82, z, 12)); // rim
+      addCollider(x, z, 0.32, 0.32, 0.85);
+    }
+  };
+  barrelCluster([[-9.7, -9.62], [-8.9, -9.62], [-9.3, -10.15]], 3404); // container (-8,-8) north face
+  barrelCluster([[3.62, -7.2], [3.62, -6.3], [3.62, -5.4]], 3405); // container (2,-6) east face
+  barrelCluster([[5, -11.38], [6, -11.38], [7, -11.38]], 3406); // container (6,-13) south face
 
   // --- Dry grass tufts poking through the snow (non-collidable) ------------------
   const rnd = mulberry32(2024);

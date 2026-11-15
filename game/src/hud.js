@@ -48,6 +48,11 @@ export class HUD {
     this.flashFx = el('div', 'flashfx', this.root);
     // --- Banner (centre) ---
     this.banner = el('div', 'banner', this.root);
+    // --- v3.8 kill banners: HEADSHOT (top-right) + multi-kill (centre-low) ---
+    this.killBanner = el('div', 'killbanner hidden', this.root);
+    this.multiBanner = el('div', 'multibanner hidden', this.root);
+    this._killBannerT = 0;
+    this._multiBannerT = 0;
     // --- Crosshair (centre) ---
     this.cross = el('div', 'cross', this.root);
     for (let i = 0; i < 4; i++) el('i', '', this.cross);
@@ -151,6 +156,17 @@ export class HUD {
     this.buy.classList.toggle('hidden', !open);
     this.buyBackdrop.classList.toggle('hidden', !open);
     if (open) this.refreshBuy();
+  }
+  showKillBanner(kind) {
+    if (kind === 'headshot') {
+      this.killBanner.innerHTML = `☠ HEADSHOT! <b>+100</b>`;
+      this.killBanner.classList.remove('hidden');
+      this._killBannerT = 1.5;
+    } else if (kind === 'double' || kind === 'triple') {
+      this.multiBanner.innerHTML = `☠ ${kind === 'double' ? 'DOUBLE KILL' : 'TRIPLE KILL'}`;
+      this.multiBanner.classList.remove('hidden');
+      this._multiBannerT = 1.5;
+    }
   }
   pushFeed(e) {
     const d = el('div', 'feed-item', this.feed);
@@ -274,6 +290,7 @@ export class HUD {
     // Drain sim events.
     for (const e of events) {
       if (e.type === 'killfeed') this.pushFeed(e);
+      if (e.type === 'killbanner') this.showKillBanner(e.kind);
       if (e.type === 'radio') this.pushChat(e.text, e.team);
       if (e.type === 'flash' && e.strength > 0) {
         this.flashFx.style.opacity = String(Math.min(1, e.strength));
@@ -321,6 +338,15 @@ export class HUD {
       this._lastBanner = s.banner;
     }
     if (s.bannerT <= 0 || this.buyOpen) this.banner.classList.add('hidden');
+    // v3.8 kill banners: auto-hide ~1.5 s after they appear.
+    if (this._killBannerT > 0) {
+      this._killBannerT -= dt;
+      if (this._killBannerT <= 0) this.killBanner.classList.add('hidden');
+    }
+    if (this._multiBannerT > 0) {
+      this._multiBannerT -= dt;
+      if (this._multiBannerT <= 0) this.multiBanner.classList.add('hidden');
+    }
     // Health / money / ammo / weapon slots / utility.
     this.hpFill.style.width = `${p.hp}%`;
     this.hpFill.style.background = p.hp > 50 ? '#6fc3d8' : p.hp > 25 ? '#ffb347' : '#e05a4e';

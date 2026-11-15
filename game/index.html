@@ -38,6 +38,10 @@
   .flashfx { position: absolute; inset: 0; background: #fff; opacity: 0; transition: opacity 1.2s; pointer-events: none; }
   /* Banner */
   .banner { position: absolute; top: 30%; left: 50%; transform: translate(-50%, -50%); font-size: 30px; font-weight: 900; letter-spacing: .08em; text-align: center; text-shadow: 0 3px 14px rgba(0,0,0,.9); color: #ffb347; white-space: nowrap; }
+  /* v3.8 kill banners: red splatter style, clear of the crosshair. */
+  .killbanner { position: absolute; top: 132px; right: 16px; font-size: 26px; font-weight: 900; font-style: italic; letter-spacing: .02em; color: #fff; background: linear-gradient(100deg, rgba(190,20,20,.92), rgba(120,8,8,.88)); border: 2px solid rgba(255,90,78,.9); border-radius: 6px; padding: 8px 14px; transform: skewX(-6deg); text-shadow: 0 2px 8px rgba(0,0,0,.8); box-shadow: 0 4px 18px rgba(0,0,0,.5); white-space: nowrap; }
+  .killbanner b { color: #ffd24a; }
+  .multibanner { position: absolute; top: 76%; left: 50%; transform: translate(-50%, -50%) skewX(-6deg); font-size: 30px; font-weight: 900; font-style: italic; letter-spacing: .04em; color: #fff; background: linear-gradient(100deg, rgba(190,20,20,.92), rgba(120,8,8,.88)); border: 2px solid rgba(255,90,78,.9); border-radius: 6px; padding: 8px 18px; text-shadow: 0 2px 8px rgba(0,0,0,.8); box-shadow: 0 4px 18px rgba(0,0,0,.5); white-space: nowrap; }
   /* Crosshair */
   .cross { position: absolute; left: 50%; top: 50%; width: 0; height: 0; --sp: 8px; }
   .cross i { position: absolute; background: rgba(238,242,246,.95); box-shadow: 0 0 3px #000; }

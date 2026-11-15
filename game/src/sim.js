@@ -33,6 +33,8 @@ export class Sim {
     this.time = 0;
     this.banner = '';
     this.bannerT = 0;
+    this.killStreak = 0; // v3.8: consecutive player kills inside the multi-kill window
+    this.lastKillT = -99;
     this.smokes = []; // active smoke clouds {pos, radius, until} — block bot LOS
     this.radioT = -99; // last radio line (global throttle)
     this.radioPerBot = new Map(); // bot name -> last line time
@@ -216,6 +218,17 @@ export class Sim {
     this.endRound('bastion', 'BOMB DEFUSED');
   }
 
+  // --- Kill banners (v3.8 action pass) ------------------------------------------
+  // Headshot and multi-kill banners are HUD events; the streak window is 4 s.
+  _onPlayerKill(headshot) {
+    if (this.time - this.lastKillT < 4) this.killStreak += 1;
+    else this.killStreak = 1;
+    this.lastKillT = this.time;
+    if (headshot) this.events.push({ type: 'killbanner', kind: 'headshot' });
+    if (this.killStreak === 2) this.events.push({ type: 'killbanner', kind: 'double' });
+    if (this.killStreak === 3) this.events.push({ type: 'killbanner', kind: 'triple' });
+  }
+
   // --- Shooting --------------------------------------------------------------------
   resolveShot(shot) {
     const { origin, dir, weapon } = shot;
@@ -254,7 +267,7 @@ export class Sim {
     if (best.kind === 'bot') {
       const mult = best.part === 'head' ? weapon.def.headMult : best.part === 'legs' ? 0.75 : 1;
       const dmg = Math.round(weapon.def.damage * mult);
-      const killed = best.bot.damage(dmg);
+      const killed = best.bot.takeDamage(dmg);
       this.audio.hit();
       this.fx.particles.burst(point, 6, 2.5, 0.5, [0.75, 0.15, 0.12], 0.8, -3);
       if (killed) {
@@ -264,6 +277,7 @@ export class Sim {
           type: 'killfeed', killer: 'You', victim: best.bot.name,
           weapon: weapon.def.name, headshot: best.part === 'head',
         });
+        this._onPlayerKill(best.part === 'head');
         if (best.bot.isCarrier) {
           // Bomb drops to the nearest alive Solara bot.
           const next = this.bots.find((b) => b.alive && b.team === 'solara');
@@ -318,7 +332,7 @@ export class Sim {
         }
       }
     } else if (enemy.bot) {
-      const died = enemy.bot.damage(bot.damage);
+      const died = enemy.bot.takeDamage(bot.damage);
       if (died) {
         this.events.push({
           type: 'killfeed', killer: bot.name, victim: enemy.bot.name,
@@ -338,6 +352,8 @@ export class Sim {
   update(dt, input) {
     this.time += dt;
     this.bannerT = Math.max(0, this.bannerT - dt);
+    // v3.8: the multi-kill streak expires 4 s after the last player kill.
+    if (this.killStreak > 0 && this.time - this.lastKillT > 4) this.killStreak = 0;
     // Smoke clouds from the player's smoke grenades (block bot LOS).
     if (this.player.lastSmoke) {
       const s = this.player.lastSmoke;
@@ -373,13 +389,14 @@ export class Sim {
         if (!b.alive) continue;
         const d = b.pos.distanceTo(blast.pos);
         if (d < blast.radius) {
-          const died = b.damage(Math.round(blast.damage * (1 - d / blast.radius)));
+          const died = b.takeDamage(Math.round(blast.damage * (1 - d / blast.radius)));
           if (died) {
             this.player.money += 300;
             this.events.push({
               type: 'killfeed', killer: 'You', victim: b.name,
               weapon: 'HE', headshot: false,
             });
+            this._onPlayerKill(false);
           }
         }
       }
@@ -444,7 +461,7 @@ export class Sim {
     const ctx = {
       player: p, bots: this.bots, map: this.map,
       bombPlanted: this.bombPlanted, bombSite: this.bombSite,
-      time: this.time,
+      time: this.time, phase: this.phase, // v3.8: bots only shoot in 'round'
       smokes: this.smokes,
       siteClear: (site) => this.siteClear(site),
       onPlant: (bot) => this.onBotPlant(bot),

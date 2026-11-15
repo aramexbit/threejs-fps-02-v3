@@ -185,7 +185,13 @@ export class Bot {
       this.alertPos = { x: pos.x, z: pos.z };
     }
   }
-  damage(amount) {
+  // v3.8 fix: was `damage(amount)` — but the constructor sets the own
+  // property `this.damage = 13|10` (per-hit damage vs the player), which
+  // shadowed the prototype method, so every `bot.damage(x)` call threw
+  // "damage is not a function" and no bot could ever be killed by a shot
+  // or grenade (killfeed / _onPlayerKill / kill banners unreachable).
+  // Renamed to takeDamage; the numeric `this.damage` property is untouched.
+  takeDamage(amount) {
     if (!this.alive) return false;
     this.hp -= amount;
     if (this.hp <= 0) { this.hp = 0; this.alive = false; this.mesh.visible = false; }
@@ -207,7 +213,12 @@ export class Bot {
     }
     // --- Perception ----------------------------------------------------------
     let enemy = null; // {pos, isPlayer, bot}
-    if (player.alive && player.pos.distanceTo(this.pos) < 32 && this.canSee(player.pos)) {
+    // v3.8 fix: only BASTION bots treat the player as an enemy. The old
+    // code had no team check, so the player's own SOLARA teammates opened
+    // fire on them at round start (diagnosed 15 Nov: 100 -> 21 HP in the
+    // first 0.5 s of the round, dead ~1 s in — all from point-blank
+    // teammates at spawn). Solara bots skip the player and hunt Bastion.
+    if (this.team === 'bastion' && player.alive && player.pos.distanceTo(this.pos) < 32 && this.canSee(player.pos)) {
       enemy = { pos: player.pos, isPlayer: true };
     } else {
       for (const b of ctx.bots) {
@@ -215,10 +226,17 @@ export class Bot {
         if (b.pos.distanceTo(this.pos) < 30 && this.canSee(b.pos)) { enemy = { pos: b.pos, bot: b }; break; }
       }
     }
-    if (enemy && this.reaction <= 0) {
+    // v3.8 fix: the reaction timer was re-armed EVERY frame it expired
+    // while the enemy stayed visible (this block runs before the combat
+    // block in the same update), so a bot could never reach the fire
+    // branch — bots aimed but never shot. Only (re-)arm + call out when
+    // the enemy is NEWLY spotted; a continuously visible enemy lets the
+    // timer run down and the bot fire its bursts.
+    if (enemy && !this._hadEnemy) {
       this.reaction = 0.25 + this.rng() * 0.35;
       ctx.onRadio(this, `Contact ${siteNameFor(enemy.pos, this.map)} — ${enemy.isPlayer ? 'one hostile!' : 'enemy spotted!'}`);
     }
+    this._hadEnemy = !!enemy;
     if (!enemy) this.reaction = Math.max(0, this.reaction - dt);
     // --- Objective state ------------------------------------------------------
     const sitePos = this.site && ctx.map.sites[this.site] ? ctx.map.sites[this.site].center : null;
@@ -289,7 +307,11 @@ export class Bot {
       this.yaw = Math.atan2(-(enemy.pos.x - this.pos.x), -(enemy.pos.z - this.pos.z)) + Math.PI;
     }
     // --- Combat (blinded bots cannot shoot) --------------------------------------
-    if (enemy && this.blindT <= 0) {
+    // v3.8: bots only shoot during the round — during freeze/buy (and the
+    // end-of-round pause) they stay silent by design. Without this gate the
+    // stationary player is killed at spawn before the round even starts
+    // (diagnosed 15 Nov: dead at simTime ~1.4 s, still in freeze).
+    if (enemy && this.blindT <= 0 && ctx.phase === 'round') {
       this.state = 'engage';
       const to = enemy.pos;
       this.yaw = Math.atan2(-(to.x - this.pos.x), -(to.z - this.pos.z)) + Math.PI;

@@ -274,7 +274,11 @@ export class Player {
     // Muzzle world position for the flash + smoke.
     const mw = new THREE.Vector3();
     this.muzzle.getWorldPosition(mw);
-    this.fx.flash.fire(mw);
+    // v3.8: the flash blooms 0.2 m past the muzzle along the aim, so the
+    // starburst sits in open air instead of inside the barrel tip (where
+    // the front sight + bright snow wash it out).
+    const fwd = new THREE.Vector3(0, 0, -1).applyEuler(this.camera.rotation);
+    this.fx.flash.fire(mw.clone().addScaledVector(fwd, 0.2));
     this.fx.particles.smoke(mw, 1, 0.15, 0.4, 1.2);
     return { origin: this.camera.position.clone(), dir: this._aimDir(spread, rng), weapon: w, muzzlePos: mw };
   }

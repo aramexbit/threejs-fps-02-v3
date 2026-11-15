@@ -4,8 +4,9 @@
 // simulation at a fixed 60 Hz apart from rendering; applies a small custom
 // fullscreen post pass (vignette + grade, written from scratch — the vendored
 // core ships no examples/jsm EffectComposer); and serves the four screenshot
-// modes ?shot=start|play|buy|plant|end&seed=N, signalling window.__shotReady once
-// the frame is on screen. Deterministic: every random choice is seeded.
+// modes ?shot=start|play|buy|plant|end|action&seed=N, signalling
+// window.__shotReady once the frame is on screen. Deterministic: every
+// random choice is seeded.
 import * as THREE from 'three';
 import { buildMap } from './map.js';
 import { createSky, createClouds, createLights, applyEnvironment } from './sky.js';
@@ -80,7 +81,7 @@ for (const n of BASTION_NAMES) bots.push(new Bot(scene, map, 'bastion', n, mulbe
 const sim = new Sim(map, player, bots, fx, audio, rng);
 sim.startRound();
 // Debug/verification handle (read-only inspection for playtests).
-window.__game = { sim, player, bots };
+window.__game = { sim, player, bots, camera };
 
 // Bomb mesh: a dark case with a blinking red light, shown while planted.
 const bombMesh = new THREE.Group();
@@ -177,7 +178,12 @@ function setupShot() {
     player.pitch = 0.01;
     sim.phase = 'round';
     sim.timer = 82;
+    // v3.8: bots shoot for real now — buffer the player's HP through the
+    // 5 s advance (they would otherwise kill the stationary player
+    // mid-setup), then restore 100 for the screenshot. Shot mode only.
+    player.hp = 100000;
     for (let i = 0; i < 300; i++) sim.update(1 / 60, input);
+    player.hp = 100;
     player.pos.set(-6, 0, 1);
     player.yaw = -Math.PI / 2 - 0.12;
   } else if (SHOT === 'buy') {
@@ -196,7 +202,10 @@ function setupShot() {
     player.pitch = 0.01;
     sim.phase = 'round';
     sim.timer = 64;
+    // v3.8: same HP buffer as 'play' (see above) — bots shoot for real now.
+    player.hp = 100000;
     for (let i = 0; i < 300; i++) sim.update(1 / 60, input);
+    player.hp = 100;
     sim.bombPlanted = false;
     sim.bombSite = null;
     sim.bombPos = null;
@@ -219,6 +228,47 @@ function setupShot() {
     player.pos.set(0, 0, 6);
     player.yaw = -Math.PI / 2 - 0.35;
     player.pitch = 0.02;
+  } else if (SHOT === 'action') {
+    // v3.8 action cover: stage a firefight like the reference — teammate
+    // Solara on the left edge, Bastion bots mid-frame, player firing the
+    // AR-77. Bots are teleported into the player's view cone after the sim
+    // advance; the shot script fires the round + banners (see
+    // frostline-action-shot.mjs). No gameplay change: shot mode only.
+    player.money = 10000;
+    player.buy('ar77');
+    player.equip(player.slots.length - 1);
+    player.pos.set(-6, 0, 1);
+    player.yaw = -Math.PI / 2 - 0.12;
+    player.pitch = 0.01;
+    sim.phase = 'round';
+    sim.timer = 82;
+    // v3.8: same HP buffer as 'play' (see above) — bots shoot for real now.
+    player.hp = 100000;
+    for (let i = 0; i < 300; i++) sim.update(1 / 60, input);
+    player.hp = 100;
+    // Stage the firefight: 2 Bastion bots in the open mid, close enough to
+    // read large in frame (6-7 m), 1 Solara bot on the left edge — all
+    // facing the player. Spots avoid the bonfires at (0,6) and (3,3).
+    // Staged bots are restored to full HP: they may have taken bot-vs-bot
+    // fire during the advance, and the staging must hold for the shot.
+    const bastion = bots.filter((b) => b.alive && b.team === 'bastion');
+    const solara = bots.filter((b) => b.alive && b.team === 'solara');
+    const spots = [[0.5, -1], [0, 2]];
+    bastion.slice(0, 2).forEach((b, i) => {
+      b.pos.set(spots[i][0], 0, spots[i][1]);
+      b.yaw = Math.atan2(-(player.pos.x - b.pos.x), -(player.pos.z - b.pos.z)) + Math.PI;
+      b.goal = null;
+      b.hp = 100; b.alive = true; b.mesh.visible = true;
+    });
+    if (solara[0]) {
+      solara[0].pos.set(-2.5, 0, -3.5);
+      solara[0].yaw = Math.atan2(-(player.pos.x - solara[0].pos.x), -(player.pos.z - solara[0].pos.z)) + Math.PI;
+      solara[0].goal = null;
+      solara[0].hp = 100; solara[0].alive = true; solara[0].mesh.visible = true;
+    }
+    player.pos.set(-6, 0, 1);
+    player.yaw = -Math.PI / 2 - 0.12;
+    player.pitch = 0.01;
   }
   player.applyCamera(0);
 }

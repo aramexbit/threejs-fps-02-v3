@@ -30,8 +30,19 @@ export function normalizeRifle(gltf) {
   inner.scale.setScalar(s);
   inner.position.set(-center.x * s, -center.y * s, -center.z * s);
   const group = new THREE.Group();
-  group.add(inner);
-  group.rotation.y = Math.PI / 2; // +X (barrel) -> -Z (forward)
+  // v3.8: the barrel rotation MUST live on an inner wrapper, not on the
+  // outer group. player.update() overwrites viewmodel.rotation.y with the
+  // pose yaw (vmBase.ry) every frame — when the PI/2 lived on the outer
+  // group it was clobbered, so the GLB barrel pointed +X (right, off-frame)
+  // while the muzzle empty sat at -Z (forward): the rifle sprawled across
+  // the screen and the muzzle flash fired from mid-air, nowhere near the
+  // visible barrel tip. With the rotation baked into the wrapper, the
+  // outer group's rotation.y stays free for the pose and the muzzle
+  // (0, 0.02, -0.44) sits exactly at the barrel tip.
+  const rot = new THREE.Group();
+  rot.add(inner);
+  rot.rotation.y = Math.PI / 2; // +X (barrel) -> -Z (forward)
+  group.add(rot);
   // The source base colors are near-black (0.01–0.03) and read as a black
   // slab in daylight — brighten x12 + lift so the rifle reads as gunmetal
   // like the primitive did. Keep the relative shading between the 3 mats.

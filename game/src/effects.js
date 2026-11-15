@@ -95,13 +95,44 @@ export class ParticleSystem {
 }
 
 // --- Muzzle flash: sprite + short point light at the barrel tip ------------------
+// v3.8 action pass: a 4-point starburst (drawn on canvas) at 2x the old
+// scale, with a stronger light — the flash must read clearly in screenshots
+// without blocking the player's view (it lives 0.12 s, a normal FPS flicker).
+function starTexture() {
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 128;
+  const g = c.getContext('2d');
+  g.translate(64, 64);
+  const grad = g.createRadialGradient(0, 0, 2, 0, 0, 60);
+  grad.addColorStop(0, 'rgba(255,242,205,1)');
+  grad.addColorStop(0.25, 'rgba(255,205,95,0.95)');
+  grad.addColorStop(0.6, 'rgba(255,125,30,0.55)');
+  grad.addColorStop(1, 'rgba(255,80,10,0)');
+  g.fillStyle = grad;
+  const spike = (angle, len, w) => {
+    g.save();
+    g.rotate(angle);
+    g.beginPath();
+    g.moveTo(0, -w);
+    g.lineTo(len, 0);
+    g.lineTo(0, w);
+    g.closePath();
+    g.fill();
+    g.restore();
+  };
+  for (let i = 0; i < 4; i++) spike((i * Math.PI) / 2, 62, 7);
+  for (let i = 0; i < 4; i++) spike((i * Math.PI) / 2 + Math.PI / 4, 34, 5);
+  g.beginPath(); g.arc(0, 0, 16, 0, Math.PI * 2); g.fill();
+  return new THREE.CanvasTexture(c);
+}
+
 export class MuzzleFlash {
   constructor(scene) {
-    const t = radialTexture('rgba(255,220,140,1)', 'rgba(255,120,30,0)');
+    const t = starTexture();
     this.sprite = new THREE.Sprite(new THREE.SpriteMaterial({
       map: t, color: 0xffc46a, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
     }));
-    this.sprite.scale.set(0.5, 0.5, 1);
+    this.sprite.scale.set(0.85, 0.85, 1);
     this.sprite.visible = false;
     scene.add(this.sprite);
     this.light = new THREE.PointLight(0xffb347, 0, 9, 1.8);
@@ -111,10 +142,10 @@ export class MuzzleFlash {
   fire(worldPos) {
     this.sprite.position.copy(worldPos);
     this.sprite.visible = true;
-    this.sprite.scale.set(0.5, 0.5, 1);
+    this.sprite.scale.set(0.85, 0.85, 1);
     this.light.position.copy(worldPos);
-    this.light.intensity = 26;
-    this.t = 0.05;
+    this.light.intensity = 30;
+    this.t = 0.12;
   }
   update(dt) {
     if (this.t <= 0) return;
@@ -123,7 +154,7 @@ export class MuzzleFlash {
       this.sprite.visible = false;
       this.light.intensity = 0;
     } else {
-      this.light.intensity = 26 * (this.t / 0.05);
+      this.light.intensity = 30 * (this.t / 0.12);
     }
   }
 }

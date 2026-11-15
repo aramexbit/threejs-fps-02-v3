@@ -221,7 +221,7 @@ export class Player {
     this.muzzle.getWorldPosition(mw);
     this.fx.flash.fire(mw);
     this.fx.particles.smoke(mw, 1, 0.15, 0.4, 1.2);
-    return { origin: this.camera.position.clone(), dir: this._aimDir(spread, rng), weapon: w };
+    return { origin: this.camera.position.clone(), dir: this._aimDir(spread, rng), weapon: w, muzzlePos: mw };
   }
   _aimDir(spread, rng) {
     const dir = new THREE.Vector3(0, 0, -1).applyEuler(this.camera.rotation);

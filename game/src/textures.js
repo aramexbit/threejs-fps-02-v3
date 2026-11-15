@@ -123,9 +123,17 @@ export function snowTextures(seed = 11, size = 512) {
     }
   }
   g.putImageData(img, 0, 0);
-  // Sparkle glints.
-  g.fillStyle = 'rgba(255,255,255,0.8)';
-  for (const [px, py] of sparkles) g.fillRect(px, py, 1.4, 1.4);
+  // Sparkle glints: white in the albedo AND polished metal in the ORM,
+  // so they catch the sun and glint as the camera moves (Gemini realism pass).
+  g.fillStyle = 'rgba(255,255,255,1.0)';
+  for (const [px, py] of sparkles) {
+    g.fillRect(px, py, 1.2, 1.2);
+    const idx = Math.floor(py) * size + Math.floor(px);
+    if (idx >= 0 && idx < size * size) {
+      rough[idx] = 0.1;
+      metal[idx] = 1.0;
+    }
+  }
   // Footprints: dark blue-grey ovals, slightly offset pairs.
   for (const pts of trails) {
     for (const [px, py, a] of pts) {

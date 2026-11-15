@@ -78,15 +78,31 @@ let _mats = null;
 function mats() {
   if (_mats) return _mats;
   _mats = {
-    gunmetal: new THREE.MeshStandardMaterial({ color: 0x424a55, roughness: 0.42, metalness: 0.85 }),
-    gunmetalLight: new THREE.MeshStandardMaterial({ color: 0x6a727e, roughness: 0.38, metalness: 0.9 }),
+    gunmetal: new THREE.MeshStandardMaterial({ color: 0x565e68, roughness: 0.42, metalness: 0.85 }),
+    gunmetalLight: new THREE.MeshStandardMaterial({ color: 0x7d8590, roughness: 0.38, metalness: 0.9 }),
     polymer: new THREE.MeshStandardMaterial({ color: 0x1e2124, roughness: 0.85, metalness: 0.1 }),
     wood: new THREE.MeshStandardMaterial({ color: 0x5a4028, roughness: 0.8, metalness: 0.0 }),
     glove: new THREE.MeshStandardMaterial({ color: 0x54483a, roughness: 0.95, metalness: 0.0 }),
     gloveCuff: new THREE.MeshStandardMaterial({ color: 0x6a5f4c, roughness: 0.95, metalness: 0.0 }),
-    glass: new THREE.MeshStandardMaterial({ color: 0x9fc4d8, roughness: 0.1, metalness: 0.4, emissive: 0x1a2c38 }),
+    glass: new THREE.MeshStandardMaterial({ color: 0x9fc4d8, roughness: 0.1, metalness: 0.4, emissive: 0x1a2c38, transparent: true, opacity: 0.5 }),
+    reticle: new THREE.MeshBasicMaterial({ color: 0xff2222 }),
   };
   return _mats;
+}
+
+// Holographic sight (EOTech-style): housing + hollow window + glass with a
+// glowing red reticle dot. The glass/dot face +Z, toward the shooter's eye.
+function holoSight(x, y, z) {
+  const M = mats();
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  g.add(box(0.05, 0.045, 0.08, M.gunmetal, 0, 0, 0)); // housing
+  g.add(box(0.04, 0.035, 0.082, M.polymer, 0, 0, 0)); // hollow window interior
+  g.add(box(0.038, 0.032, 0.005, M.glass, 0, 0, 0.01)); // glass
+  const dot = new THREE.Mesh(new THREE.CircleGeometry(0.003, 8), M.reticle);
+  dot.position.set(0, 0, 0.011);
+  g.add(dot);
+  return g;
 }
 
 function box(w, h, d, mat, x, y, z, rx = 0, rz = 0) {
@@ -137,13 +153,22 @@ export function buildViewmodel(id) {
   const muzzle = new THREE.Object3D();
   // Forward is -Z (three.js camera convention).
   if (id === 'p9') {
-    group.add(box(0.055, 0.05, 0.24, M.gunmetal, 0, 0, -0.08)); // slide
-    group.add(box(0.05, 0.03, 0.2, M.gunmetalLight, 0, 0.028, -0.08)); // slide top
-    group.add(box(0.05, 0.11, 0.07, M.polymer, 0, -0.07, 0.045, 0.18)); // grip
+    // Gemini realism pass: ejection port, trigger guard + trigger, hammer,
+    // slide serrations — breaks the "dark box" read of the stock pistol.
+    group.add(box(0.055, 0.052, 0.25, M.gunmetal, 0, 0, -0.08)); // slide
+    group.add(box(0.052, 0.03, 0.21, M.gunmetalLight, 0, 0.028, -0.08)); // slide top
+    group.add(box(0.05, 0.12, 0.075, M.polymer, 0, -0.075, 0.045, 0.18)); // grip
+    group.add(box(0.056, 0.02, 0.06, M.polymer, 0.01, 0.015, -0.05)); // ejection port recess
+    group.add(box(0.01, 0.05, 0.08, M.polymer, 0, -0.05, -0.05, -0.4)); // trigger guard
+    group.add(cyl(0.005, 0.005, 0.03, M.gunmetalLight, 0, -0.04, -0.03, 0)); // trigger
+    group.add(box(0.015, 0.03, 0.01, M.gunmetal, 0, 0.01, 0.04, -0.5)); // hammer
+    // Serrations: full slide height and slightly wider than the slide so the
+    // ribs actually read (a 0.058-wide box would hide inside the slide).
+    for (let i = 0; i < 5; i++) group.add(box(0.06, 0.052, 0.006, M.polymer, 0, 0, -i * 0.012));
     group.add(box(0.012, 0.018, 0.012, M.gunmetalLight, 0, 0.032, -0.19)); // front sight
     group.add(box(0.03, 0.012, 0.02, M.gunmetalLight, 0, 0.03, 0.02)); // rear sight
     group.add(cyl(0.012, 0.012, 0.03, M.gunmetal, 0, 0.005, -0.21)); // muzzle
-    group.add(glovedHand(0, -0.075, 0.05, 0.18));
+    group.add(glovedHand(0, -0.08, 0.05, 0.18));
     muzzle.position.set(0, 0.005, -0.23);
   } else if (id === 'vex9') {
     group.add(box(0.06, 0.07, 0.34, M.gunmetal, 0, 0, -0.05)); // receiver
@@ -151,7 +176,7 @@ export function buildViewmodel(id) {
     group.add(box(0.045, 0.14, 0.06, M.polymer, 0, -0.095, -0.10, 0.12)); // long mag
     group.add(box(0.05, 0.09, 0.07, M.polymer, 0, -0.065, 0.10, 0.2)); // grip
     group.add(box(0.05, 0.05, 0.12, M.polymer, 0, -0.055, 0.16)); // stock
-    group.add(apertureSight(0, 0.055, -0.02));
+    group.add(holoSight(0, 0.06, -0.02)); // holographic sight (Gemini realism pass)
     group.add(box(0.012, 0.02, 0.012, M.gunmetalLight, 0, 0.045, -0.36)); // front post
     group.add(glovedHand(0, -0.07, 0.10, 0.2));
     group.add(glovedHand(0.01, -0.055, -0.16, 0.1)); // support hand on shroud
@@ -163,8 +188,11 @@ export function buildViewmodel(id) {
     group.add(box(0.05, 0.13, 0.07, M.polymer, 0, -0.09, -0.06, 0.22)); // curved mag
     group.add(box(0.05, 0.09, 0.07, M.polymer, 0, -0.065, 0.12, 0.2)); // grip
     group.add(box(0.055, 0.075, 0.16, M.wood, 0, -0.01, 0.24)); // stock
-    group.add(box(0.03, 0.02, 0.05, M.gunmetalLight, 0, 0.05, -0.16)); // carry handle
-    group.add(apertureSight(0, 0.06, -0.10));
+    group.add(box(0.03, 0.02, 0.12, M.gunmetalLight, 0, 0.045, -0.12)); // rail
+    group.add(holoSight(0, 0.07, -0.12)); // holographic sight (Gemini realism pass)
+    // Edge wear: light strips along the receiver edges catch the bright sun.
+    group.add(box(0.064, 0.005, 0.36, M.gunmetalLight, 0, 0.038, -0.02));
+    group.add(box(0.064, 0.005, 0.36, M.gunmetalLight, 0, -0.038, -0.02));
     group.add(box(0.012, 0.022, 0.012, M.gunmetalLight, 0, 0.045, -0.42)); // front post
     group.add(glovedHand(0, -0.07, 0.12, 0.2));
     group.add(glovedHand(0.01, -0.06, -0.28, 0.08)); // support hand

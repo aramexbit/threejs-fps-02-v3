@@ -11,8 +11,8 @@ import * as THREE from 'three';
 // directional light, and the cold-daylight look.
 export const SUN_DIR = new THREE.Vector3(-0.55, 0.42, -0.72).normalize();
 export const SUN_COLOR = 0xfff2dd;
-export const HORIZON_COLOR = new THREE.Color(0xc7d2dc);
-export const ZENITH_COLOR = new THREE.Color(0x5d748e);
+export const HORIZON_COLOR = new THREE.Color(0xdce5ee);
+export const ZENITH_COLOR = new THREE.Color(0x91a9c1); // Gemini realism pass: brighter sky (was 0xc7d2dc / 0x5d748e)
 
 const SKY_VERT = /* glsl */`
 varying vec3 vDir;
@@ -106,7 +106,7 @@ export function applyEnvironment(renderer, scene, skyMesh) {
   envScene.add(skyMesh.clone());
   const rt = pmrem.fromScene(envScene, 0.04);
   scene.environment = rt.texture;
-  scene.environmentIntensity = 0.7;
+  scene.environmentIntensity = 1.15; // Rebalance after v3.1 screenshots: 1.3 washed out snow detail (was 0.7 in v3)
   pmrem.dispose();
   return rt;
 }
@@ -119,7 +119,7 @@ export function applyEnvironment(renderer, scene, skyMesh) {
 export function createLights(scene) {
   const hemi = new THREE.HemisphereLight(0xdfe8f2, 0x9aa7b5, 0.95);
   scene.add(hemi);
-  const sun = new THREE.DirectionalLight(SUN_COLOR, 2.2);
+  const sun = new THREE.DirectionalLight(SUN_COLOR, 3.2); // Rebalance after v3.1 screenshots: 3.8 clipped snow highlights (was 2.2 in v3)
   sun.position.copy(SUN_DIR).multiplyScalar(60);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -128,12 +128,12 @@ export function createLights(scene) {
   sun.shadow.camera.near = 10; sun.shadow.camera.far = 140;
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.02;
-  sun.shadow.radius = 4; // soft edge (PCF + radius; r187 removed PCFSoft)
+  sun.shadow.radius = 6; // soft edge (PCF + radius; r187 removed PCFSoft) — Gemini realism pass: softer scattered snow light (was 4)
   scene.add(sun);
   scene.add(sun.target);
   const fill = new THREE.DirectionalLight(0xffd9b0, 0.25);
   fill.position.set(28, 14, 30);
   scene.add(fill);
-  scene.fog = new THREE.FogExp2(0xc7d2dc, 0.008);
+  scene.fog = new THREE.FogExp2(0xdce5ee, 0.005); // Gemini realism pass: thinner fog, bright horizon stays visible (was 0xc7d2dc, 0.008)
   return { hemi, sun, fill };
 }

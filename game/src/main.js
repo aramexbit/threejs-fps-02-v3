@@ -15,7 +15,7 @@ import { Sim } from './sim.js';
 import { Input } from './input.js';
 import { HUD } from './hud.js';
 import { AudioSys } from './audio.js';
-import { ParticleSystem, MuzzleFlash, DecalPool, Fire, ChimneySmoke, Snowfall, Explosion } from './effects.js';
+import { ParticleSystem, MuzzleFlash, DecalPool, Fire, ChimneySmoke, Snowfall, Explosion, TracerPool } from './effects.js';
 import { mulberry32 } from './rng.js';
 
 const params = new URLSearchParams(location.search);
@@ -30,7 +30,7 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap; // r187 removed PCFSoftShadowMap; PCF + radius 4 is the soft fallback
 renderer.toneMapping = THREE.AgXToneMapping;
-renderer.toneMappingExposure = 1.05;
+renderer.toneMappingExposure = 1.3; // Rebalance after v3.1 screenshots: 1.45 blew the snow out to flat white (was 1.05 in v3)
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
@@ -52,6 +52,7 @@ const fx = {
   flash: new MuzzleFlash(scene),
   decals: new DecalPool(scene),
   explosion: null,
+  tracers: new TracerPool(scene), // Gemini realism pass: shot streaks
 };
 fx.explosion = new Explosion(scene, fx.particles);
 const fires = [];
@@ -113,7 +114,7 @@ void main(){
   c = pow(c, vec3(0.96));
   // Vignette.
   vec2 d = vUv - 0.5;
-  float vig = 1.0 - dot(d, d) * 0.55;
+  float vig = 1.0 - dot(d, d) * 0.25; // Gemini realism pass: lighter vignette keeps the frame bright (was 0.55)
   gl_FragColor = vec4(c * vig, 1.0);
 }`;
 let postOK = true;
@@ -202,6 +203,7 @@ function frame(now) {
   fx.flash.update(dt);
   fx.decals.update(dt);
   fx.explosion.update(dt);
+  fx.tracers.update(dt); // Gemini realism pass
   for (const f of fires) f.update(dt, fx.particles);
   for (const c of chimneys) c.update(dt, fx.particles);
   snowfall.update(dt, t, player.pos.x, player.pos.z);
@@ -241,11 +243,17 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
   if (rt) rt.setSize(innerWidth, innerHeight);
 });
-canvas.addEventListener('click', () => {
+const startGame = () => {
   if (SHOT) return;
   audio.ensure();
   hud.hideStart();
   input.requestLock();
-});
+};
+canvas.addEventListener('click', startGame);
+// The start overlay covers the whole viewport (pointer-events: auto) and
+// has no click handler of its own, so a click on "CLICK TO PLAY" never
+// reached the canvas — the game could not be started or fired. Route the
+// overlay click to the same start handler.
+hud.startOverlay.addEventListener('click', startGame);
 setupShot();
 requestAnimationFrame(frame);

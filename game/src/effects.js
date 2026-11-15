@@ -184,7 +184,7 @@ export class Fire {
       scene.add(s);
       this.flames.push(s);
     }
-    this.light = new THREE.PointLight(0xff7a2f, 30, 16, 1.7);
+    this.light = new THREE.PointLight(0xff6a00, 55, 22, 1.5); // Gemini realism pass: brighter, warmer, wider falloff (was 0xff7a2f, 30, 16, 1.7)
     this.light.position.copy(pos);
     this.light.position.y += 0.8;
     scene.add(this.light);
@@ -202,11 +202,11 @@ export class Fire {
       s.material.opacity = 0.65 + 0.3 * f;
     }
     this.smokeTimer += dt;
-    if (this.smokeTimer > 0.12) {
+    if (this.smokeTimer > 0.07) { // Gemini realism pass: thicker smoke, more often (was 0.12 / 1 particle)
       this.smokeTimer = 0;
       particles.smoke(
         new THREE.Vector3(this.pos.x, this.pos.y + 1.2 * this.scale, this.pos.z),
-        1, 0.5, 1.4, 4,
+        2, 0.6, 1.6, 5,
       );
     }
   }
@@ -263,6 +263,46 @@ export class Snowfall {
       if (dz > 30) this.pos[i * 3 + 2] -= 60; else if (dz < -30) this.pos[i * 3 + 2] += 60;
     }
     this.points.geometry.attributes.position.needsUpdate = true;
+  }
+}
+
+// --- Tracers: pooled thin additive streaks, muzzle -> impact ----------------
+// One stretched box per shot, oriented along the shot line, fading in ~0.08 s.
+// Gemini realism pass (new CoD urban reference): the red/white streaks
+// crossing the frame are the single biggest "combat chaos" cue.
+export class TracerPool {
+  constructor(scene, max = 20) {
+    this.max = max;
+    this.items = [];
+    const geo = new THREE.BoxGeometry(0.02, 0.02, 1);
+    for (let i = 0; i < max; i++) {
+      const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+        color: 0xfff0aa, transparent: true, opacity: 0,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      }));
+      m.visible = false;
+      scene.add(m);
+      this.items.push({ mesh: m, life: 0 });
+    }
+    this.head = 0;
+  }
+  spawn(start, end) {
+    const d = this.items[this.head];
+    this.head = (this.head + 1) % this.max;
+    d.mesh.position.copy(start).add(end).multiplyScalar(0.5);
+    d.mesh.lookAt(end);
+    d.mesh.scale.set(1, 1, start.distanceTo(end));
+    d.mesh.visible = true;
+    d.mesh.material.opacity = 1.0;
+    d.life = 0.08;
+  }
+  update(dt) {
+    for (const d of this.items) {
+      if (d.life <= 0) continue;
+      d.life -= dt;
+      d.mesh.material.opacity = Math.max(0, d.life / 0.08);
+      if (d.life <= 0) d.mesh.visible = false;
+    }
   }
 }
 

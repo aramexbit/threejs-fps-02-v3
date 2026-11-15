@@ -219,10 +219,12 @@ export class Sim {
       if (t > 0 && t < bestT) { bestT = t; best = { kind: 'ground' }; }
     }
     if (!best || bestT === Infinity || bestT > weapon.def.range) {
-      // Tracer into the sky: nothing hit.
+      // Tracer into the sky: nothing hit (still draw the streak to max range).
+      if (shot.muzzlePos) this.fx.tracers.spawn(shot.muzzlePos, origin.clone().addScaledVector(dir, weapon.def.range));
       return;
     }
     const point = origin.clone().addScaledVector(dir, bestT);
+    if (shot.muzzlePos) this.fx.tracers.spawn(shot.muzzlePos, point); // Gemini realism pass
     if (best.kind === 'bot') {
       const mult = best.part === 'head' ? weapon.def.headMult : best.part === 'legs' ? 0.75 : 1;
       const dmg = Math.round(weapon.def.damage * mult);
@@ -245,11 +247,13 @@ export class Sim {
         }
       }
     } else {
-      // Impact: snow puff + decal.
+      // Impact: snow puff + decal, plus a spark burst on hard walls only
+      // (Gemini realism pass — sparks on snow would read wrong).
       const normal = best.kind === 'ground'
         ? new THREE.Vector3(0, 1, 0)
         : new THREE.Vector3(-dir.x, 0, -dir.z).normalize();
       this.fx.particles.burst(point, 8, 2, 0.7, [0.92, 0.94, 0.96], 0.6, -5);
+      if (best.kind === 'wall') this.fx.particles.burst(point, 12, 6, 0.2, [1, 0.9, 0.5], 1.2, -8);
       this.fx.decals.add(point, normal);
     }
   }

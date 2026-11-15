@@ -131,6 +131,22 @@ export function buildMap(scene) {
     group.add(cylAt(steelMat, 0.22, 0.22, 8.4, cx, 3.6, cz - 4.1, 10));
     const pipe = group.children[group.children.length - 1];
     pipe.rotation.z = Math.PI / 2;
+    // Destruction detail (Gemini realism pass): rubble chunks + exposed rebar
+    // scattered around the foundry, like the shattered concrete in the reference.
+    const rRnd = mulberry32(444);
+    for (let i = 0; i < 8; i++) {
+      const rx = cx + (rRnd() - 0.5) * 10, rz = cz + (rRnd() - 0.5) * 10;
+      const chunk = new THREE.Mesh(new THREE.DodecahedronGeometry(0.1 + rRnd() * 0.2, 0), concMat);
+      chunk.position.set(rx, 0.1, rz);
+      chunk.rotation.set(rRnd() * Math.PI, rRnd() * Math.PI, rRnd() * Math.PI);
+      chunk.castShadow = true; chunk.receiveShadow = true;
+      group.add(chunk);
+      if (i % 3 === 0) {
+        const bar = cylAt(steelMat, 0.012, 0.012, 0.8, rx, 0.35, rz, 6);
+        bar.rotation.set((rRnd() - 0.5) * 1.6, 0, (rRnd() - 0.5) * 1.6);
+        group.add(bar);
+      }
+    }
   };
   foundry(SITES.A.center.x, SITES.A.center.z);
 
@@ -237,6 +253,24 @@ export function buildMap(scene) {
     addCollider(x, z, 1.0, 1.0, 1.0);
   };
   firewood(0, 6);
+  // Destruction detail (Gemini realism pass): rubble + rebar around the mid
+  // bonfire, visible in the play shot — the foundry cluster is at site A.
+  {
+    const mRnd = mulberry32(445);
+    for (let i = 0; i < 6; i++) {
+      const rx = (mRnd() - 0.5) * 6, rz = 6 + (mRnd() - 0.5) * 6;
+      const chunk = new THREE.Mesh(new THREE.DodecahedronGeometry(0.08 + mRnd() * 0.18, 0), concMat);
+      chunk.position.set(rx, 0.08, rz);
+      chunk.rotation.set(mRnd() * Math.PI, mRnd() * Math.PI, mRnd() * Math.PI);
+      chunk.castShadow = true; chunk.receiveShadow = true;
+      group.add(chunk);
+      if (i % 2 === 0) {
+        const bar = cylAt(steelMat, 0.012, 0.012, 0.7, rx, 0.3, rz, 6);
+        bar.rotation.set((mRnd() - 0.5) * 1.6, 0, (mRnd() - 0.5) * 1.6);
+        group.add(bar);
+      }
+    }
+  }
 
   // --- Bare trees (trunk + naked branches + a few orange leaves) ---------------
   const tree = (x, z, s = 1) => {
@@ -281,8 +315,14 @@ export function buildMap(scene) {
   // --- Dry grass tufts poking through the snow (non-collidable) ------------------
   const rnd = mulberry32(2024);
   const grassGeo = new THREE.PlaneGeometry(0.34, 0.3);
-  for (let i = 0; i < 70; i++) {
-    const x = (rnd() - 0.5) * 40, z = (rnd() - 0.5) * 32;
+  for (let i = 0; i < 140; i++) { // Gemini realism pass: doubled tufts + rubble pebbles (was 70)
+    const x = (rnd() - 0.5) * 42, z = (rnd() - 0.5) * 34;
+    if (i % 3 === 0) {
+      const pebble = new THREE.Mesh(new THREE.DodecahedronGeometry(0.05 + rnd() * 0.1, 0), rockMat);
+      pebble.position.set(x, 0.02, z);
+      pebble.rotation.set(rnd() * Math.PI, rnd() * Math.PI, rnd() * Math.PI);
+      group.add(pebble);
+    }
     const tuft = new THREE.Group();
     for (let k = 0; k < 3; k++) {
       const blade = new THREE.Mesh(grassGeo, grassMat);

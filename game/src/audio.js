@@ -2,6 +2,8 @@
 // gunshots, reload clicks, hit markers, plant/defuse beeps, explosion,
 // footsteps on snow. Everything is synthesized; the context is created lazily
 // on first user gesture and every call is guarded so headless runs never fail.
+import { settings } from './settings.js';
+
 export class AudioSys {
   constructor() {
     this.ctx = null;
@@ -14,12 +16,17 @@ export class AudioSys {
       if (!AC) return false;
       this.ctx = new AC();
       this.master = this.ctx.createGain();
-      this.master.gain.value = 0.35;
+      this.applySettings(); // v3.10: volume + mute from the settings panel
       this.master.connect(this.ctx.destination);
       return true;
     } catch {
       return false;
     }
+  }
+  // v3.10: master gain follows the settings panel live. Mute = gain 0.
+  applySettings() {
+    if (!this.master) return;
+    this.master.gain.value = settings.muted ? 0 : 0.35 * settings.volume;
   }
   _noiseBuf(dur = 0.3) {
     const len = Math.max(1, Math.floor(this.ctx.sampleRate * dur));

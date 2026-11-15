@@ -46,22 +46,27 @@ export function normalizeRifle(gltf) {
   // The source base colors are near-black (0.01–0.03) and read as a black
   // slab in daylight — brighten x12 + lift so the rifle reads as gunmetal
   // like the primitive did. Keep the relative shading between the 3 mats.
+  // v3.10 TERANG SEIMBANG: lift 0.05 -> 0.10 — the darkest parts ended at
+  // ~0.17 and the viewmodel still read as a black slab in the combat shot.
   group.traverse((o) => {
     if (o.isMesh) {
       o.castShadow = false; o.receiveShadow = false;
       const m = o.material;
       if (m && m.isMeshStandardMaterial && m.color) {
-        m.color.multiplyScalar(12).addScalar(0.05);
-        m.color.r = Math.min(m.color.r, 0.9);
-        m.color.g = Math.min(m.color.g, 0.9);
-        m.color.b = Math.min(m.color.b, 0.9);
+        m.color.multiplyScalar(12).addScalar(0.10);
+        m.color.r = Math.min(m.color.r, 0.95);
+        m.color.g = Math.min(m.color.g, 0.95);
+        m.color.b = Math.min(m.color.b, 0.95);
       }
     }
   });
   // Gloved hands, same spots as the primitive AR-77 (grip + foregrip),
-  // so the rifle reads as held, not floating.
-  group.add(glovedHand(0, -0.07, 0.15, 0.2));
-  group.add(glovedHand(0.01, -0.06, -0.18, 0.08));
+  // so the rifle reads as held, not floating. Named so a bot-rifle clone
+  // (v3.10) can strip them — the bot mesh has its own arms.
+  const hand1 = glovedHand(0, -0.07, 0.15, 0.2); hand1.name = 'vm-hand';
+  const hand2 = glovedHand(0.01, -0.06, -0.18, 0.08); hand2.name = 'vm-hand';
+  group.add(hand1);
+  group.add(hand2);
   const muzzle = new THREE.Object3D();
   muzzle.name = 'muzzle';
   muzzle.position.set(0, 0.02, -0.44);

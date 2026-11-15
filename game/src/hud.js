@@ -6,6 +6,7 @@
 // money, score, kill feed, buy menu, banners) is plain DOM.
 import { WEAPONS } from './weapons.js';
 import { MAX_ROUNDS } from './sim.js';
+import { settings, saveSettings } from './settings.js';
 
 // Buy-menu weapon images (generated icons in game/assets/buy-icons/).
 // Only the four weapons have images; utility/gear rows stay text-only.
@@ -89,12 +90,43 @@ export class HUD {
     const buyFoot = el('div', 'buy-foot', this.buy);
     el('div', 'buy-econ', buyFoot).textContent = 'Win +$3,250 · Loss +$1,900 (+$500/streak, max $2,900) · Kill +$300 · Plant +$300';
     el('div', 'buy-hint', buyFoot).textContent = 'Hotkeys: [1–0] Buy · [B] Close';
+    // --- v3.10 status line: explains WHY the gun is silent right now
+    // (buy phase / dead / round over / reloading / no ammo). The v3.9
+    // playtest report "kadang tidak bisa nembak" was partly this: the gun
+    // was correctly blocked by the rules and the screen said nothing.
+    this.statusMsg = el('div', 'statusmsg hidden', this.root);
+    this._statusT = 0; // transient message timer (persistent state wins otherwise)
+    this._statusText = '';
+    // --- v3.10 gear button (top-right) + settings panel + pause overlay ---
+    this.settingsBtn = el('button', 'gearbtn', this.root);
+    this.settingsBtn.textContent = '⚙ SETTINGS';
+    this.settingsBtn.addEventListener('click', () => this.onOpenSettings && this.onOpenSettings());
+    // v3.10: the gear is only clickable while the pointer is free. While
+    // locked, a click on it would go to the canvas (and fire the weapon),
+    // so main.js hides it whenever the lock is held — Esc / pause is the
+    // way to settings mid-game.
+    this.setGearVisible = (v) => { this.settingsBtn.style.display = v ? '' : 'none'; };
+    this.settingsOpen = false;
+    this.settingsPanel = el('div', 'settings hidden', this.root);
+    this._buildSettings();
+    this.pauseOverlay = el('div', 'overlay hidden', this.root);
+    this.pauseOverlay.innerHTML = `<h1>PAUSED</h1>
+      <p class="sub">Pointer unlocked — click to resume, or open Settings below.</p>
+      <p class="cta">CLICK TO RESUME</p>`;
+    const pauseBtns = el('div', 'pause-btns', this.pauseOverlay);
+    const setBtn = el('button', 'pause-btn', pauseBtns);
+    setBtn.textContent = '⚙ SETTINGS';
+    setBtn.addEventListener('click', (e) => { e.stopPropagation(); this.onOpenSettings && this.onOpenSettings(); });
+    this.pauseOverlay.addEventListener('click', () => this.onResume && this.onResume());
+    this.onOpenSettings = null; // wired by main.js (owns input lock)
+    this.onSettingsChange = null; // wired by main.js (key) => live apply
+    this.onResume = null; // wired by main.js
     // --- Start / end overlays ---
     this.startOverlay = el('div', 'overlay', this.root);
     this.startOverlay.innerHTML = `<h1>FROSTLINE</h1>
       <p class="sub">Ironworks Ridge · 5v5 · Plant the bomb. Hold the snow.</p>
-      <p class="controls">WASD move · Mouse aim · Click fire · R reload · Shift sprint<br>
-      Ctrl crouch · Right-click aim · B buy · E plant / defuse · G grenade · 4 cycle grenade · Q switch</p>
+      <p class="controls">WASD move · Mouse aim · Click fire · R reload · Shift sprint · Space jump<br>
+      Ctrl crouch · Right-click aim · B buy · E plant / defuse · G grenade · 4 cycle grenade · Q switch · Esc settings</p>
       <p class="cta">CLICK TO PLAY</p>`;
     this.endOverlay = el('div', 'overlay hidden', this.root);
     this.feedItems = [];
@@ -151,6 +183,93 @@ export class HUD {
       row.querySelector('.buy-price').textContent = `$${price}`;
       row.classList.toggle('buy-owned', owned);
     }
+  }
+  // v3.10: settings panel — sliders + toggles bound to the shared settings
+  // singleton. Every change saves to localStorage at once and calls
+  // onSettingsChange(key) so main.js can apply it live (volume, quality).
+  _buildSettings() {
+    const p = this.settingsPanel;
+    el('div', 'settings-title', p).textContent = 'SETTINGS';
+    const row = (label) => {
+      const r = el('div', 'settings-row', p);
+      el('span', 'settings-label', r).textContent = label;
+      return r;
+    };
+    const slider = (label, min, max, step, key, fmt) => {
+      const r = row(label);
+      const input = el('input', 'settings-slider', r);
+      input.type = 'range'; input.min = min; input.max = max; input.step = step;
+      const val = el('span', 'settings-value', r);
+      const sync = () => {
+        input.value = settings[key];
+        val.textContent = fmt(settings[key]);
+      };
+      input.addEventListener('input', () => {
+        settings[key] = +input.value;
+        val.textContent = fmt(settings[key]);
+        saveSettings();
+        this.onSettingsChange && this.onSettingsChange(key);
+      });
+      (this._settingsSyncs = this._settingsSyncs || []).push(sync);
+      return sync;
+    };
+    const toggle = (label, key) => {
+      const r = row(label);
+      const input = el('input', 'settings-check', r);
+      input.type = 'checkbox';
+      const sync = () => { input.checked = settings[key]; };
+      input.addEventListener('change', () => {
+        settings[key] = input.checked;
+        saveSettings();
+        this.onSettingsChange && this.onSettingsChange(key);
+      });
+      (this._settingsSyncs = this._settingsSyncs || []).push(sync);
+      return sync;
+    };
+    this._syncSens = slider('Mouse sensitivity', 0.2, 3, 0.05, 'sensitivity', (v) => `${(+v).toFixed(2)}×`);
+    this._syncVol = slider('Master volume', 0, 1, 0.05, 'volume', (v) => `${Math.round(v * 100)}%`);
+    this._syncMute = toggle('Mute all sound', 'muted');
+    this._syncFov = slider('Field of view', 60, 100, 1, 'fov', (v) => `${v}°`);
+    this._syncInv = toggle('Invert Y (mouse up = look down)', 'invertY');
+    // Quality: two buttons, Low = lighter (pixelRatio 1, no shadows, fewer
+    // particles/snow) for weak machines; High = full look.
+    const qr = row('Graphics quality');
+    const qLow = el('button', 'settings-qbtn', qr); qLow.textContent = 'LOW';
+    const qHigh = el('button', 'settings-qbtn', qr); qHigh.textContent = 'HIGH';
+    const syncQ = () => {
+      qLow.classList.toggle('q-active', settings.quality === 'low');
+      qHigh.classList.toggle('q-active', settings.quality === 'high');
+    };
+    qLow.addEventListener('click', () => { settings.quality = 'low'; saveSettings(); syncQ(); this.onSettingsChange && this.onSettingsChange('quality'); });
+    qHigh.addEventListener('click', () => { settings.quality = 'high'; saveSettings(); syncQ(); this.onSettingsChange && this.onSettingsChange('quality'); });
+    (this._settingsSyncs = this._settingsSyncs || []).push(syncQ);
+    const foot = el('div', 'settings-foot', p);
+    foot.textContent = 'Saved automatically · Esc closes · changes apply immediately';
+    const close = el('button', 'settings-close', p);
+    close.textContent = 'CLOSE';
+    close.addEventListener('click', () => this.onCloseSettings && this.onCloseSettings());
+    this.onCloseSettings = null; // wired by main.js
+    this._refreshSettingsPanel();
+  }
+  _refreshSettingsPanel() {
+    for (const sync of this._settingsSyncs || []) sync();
+  }
+  setSettingsOpen(open) {
+    this.settingsOpen = open;
+    this.settingsPanel.classList.toggle('hidden', !open);
+    if (open) this._refreshSettingsPanel();
+  }
+  setPauseOpen(open) {
+    this.pauseOverlay.classList.toggle('hidden', !open);
+  }
+  // Transient status line (e.g. MAG FULL on a failed R). Persistent state
+  // (freeze/dead/round-over) is computed in update() and wins when no
+  // transient is showing.
+  showStatus(text, dur = 1.5) {
+    this._statusText = text;
+    this._statusT = dur;
+    this.statusMsg.textContent = text;
+    this.statusMsg.classList.remove('hidden');
   }
   setBuyOpen(open) {
     this.buyOpen = open;
@@ -259,6 +378,15 @@ export class HUD {
       g.strokeStyle = '#ff2f2f'; g.lineWidth = 2;
       g.beginPath(); g.arc(sx(this.sim.bombPos.x), sz(this.sim.bombPos.z), pulse + 6, 0, Math.PI * 2); g.stroke();
     }
+    // v3.10: dropped bomb — yellow pulsing dot, so the recovery target is
+    // visible on the map instead of vanishing silently.
+    if (this.sim.bombDropped) {
+      const pulse = 4 + Math.sin(this.sim.time * 5) * 2;
+      g.fillStyle = '#ffd24a';
+      g.beginPath(); g.arc(sx(this.sim.bombDropped.pos.x), sz(this.sim.bombDropped.pos.z), pulse + 3, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = '#0d1117'; g.lineWidth = 1.5;
+      g.beginPath(); g.arc(sx(this.sim.bombDropped.pos.x), sz(this.sim.bombDropped.pos.z), pulse + 3, 0, Math.PI * 2); g.stroke();
+    }
     // Teammates (bots).
     for (const bot of bots) {
       if (!bot.alive || bot.team !== 'solara') continue;
@@ -303,6 +431,7 @@ export class HUD {
       if (e.type === 'killbanner') this.showKillBanner(e.kind);
       if (e.type === 'hitmarker') this.showHitmarker(e.headshot);
       if (e.type === 'radio') this.pushChat(e.text, e.team);
+      if (e.type === 'status') this.showStatus(e.text, e.dur || 1.5); // v3.10
       if (e.type === 'flash' && e.strength > 0) {
         this.flashFx.style.opacity = String(Math.min(1, e.strength));
         setTimeout(() => { this.flashFx.style.opacity = '0'; }, 100);
@@ -346,7 +475,9 @@ export class HUD {
     this.timer.classList.toggle('urgent', (s.bombPlanted && s.fuse < 10) || (!s.bombPlanted && s.timer < 10 && s.phase === 'round'));
     this.bombStatus.textContent = s.bombPlanted
       ? `💣 BOMB PLANTED — SITE ${s.bombSite}`
-      : p.hasBomb ? '💣 YOU CARRY THE BOMB' : (this.botsCarrier(bots) ? '💣 ALLY CARRIES THE BOMB' : '');
+      : s.bombDropped
+        ? '💣 BOMB DROPPED — RECOVER IT'
+        : p.hasBomb ? '💣 YOU CARRY THE BOMB' : (this.botsCarrier(bots) ? '💣 ALLY CARRIES THE BOMB' : '');
     // Banner (hidden while the buy menu is open).
     if (s.bannerT > 0 && s.banner !== this._lastBanner) {
       this.banner.textContent = s.banner;
@@ -362,6 +493,27 @@ export class HUD {
     if (this._multiBannerT > 0) {
       this._multiBannerT -= dt;
       if (this._multiBannerT <= 0) this.multiBanner.classList.add('hidden');
+    }
+    // v3.10 status line: a transient message (MAG FULL, BOMB DROPPED…)
+    // wins while its timer runs; otherwise the persistent state explains
+    // why the gun is silent — freeze, dead, or round over. Before v3.10
+    // all of these showed nothing at all.
+    if (this._statusT > 0) {
+      this._statusT -= dt;
+      if (this._statusT <= 0) this.statusMsg.classList.add('hidden');
+    } else {
+      const w = p.weapon;
+      let msg = '';
+      if (s.phase === 'freeze') msg = `BUY PHASE — firing starts in ${Math.max(0, Math.ceil(s.timer))}s · press B to buy`;
+      else if (s.phase === 'end') msg = 'ROUND OVER';
+      else if (s.phase === 'matchEnd') msg = '';
+      else if (!p.alive) msg = '☠ YOU ARE DEAD — wait for the next round';
+      else if (w.reloading > 0) msg = 'RELOADING…';
+      else if (w.ammo === 0 && w.reserve === 0) msg = 'NO AMMO — buy more next round (B)';
+      if (msg) {
+        this.statusMsg.textContent = msg;
+        this.statusMsg.classList.remove('hidden');
+      } else this.statusMsg.classList.add('hidden');
     }
     // Health / money / ammo / weapon slots / utility.
     this.hpFill.style.width = `${p.hp}%`;

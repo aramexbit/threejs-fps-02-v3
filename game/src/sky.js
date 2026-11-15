@@ -138,11 +138,11 @@ export function applyEnvironment(renderer, scene, skyMesh) {
 // PCSS is not available in the vendored core (no examples/jsm), so shadows
 // use PCF + radius — the honest fallback the design doc allows.
 export function createLights(scene) {
-  const hemi = new THREE.HemisphereLight(0xbfd9ff, 0xe8eef2, 1.25); // v3.6 day: neutral blue sky + snow bounce (was lavender 1.1)
+  const hemi = new THREE.HemisphereLight(0xbfd9ff, 0xe8eef2, 1.6); // v3.10 TERANG SEIMBANG: was 1.25 — the shadow sides of bots/containers read near-black against bright snow; 1.6 lifts them without touching the sun-lit snow
   scene.add(hemi);
   // White noon-ish sun: full-strength orange turned the snow monochrome
   // red in v3.5, so the day sun is pale warm white instead.
-  const sun = new THREE.DirectionalLight(0xfff4e0, 3.0);
+  const sun = new THREE.DirectionalLight(0xfff4e0, 3.2); // v3.10: was 3.0
   sun.position.copy(SUN_DIR).multiplyScalar(60);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -151,10 +151,10 @@ export function createLights(scene) {
   sun.shadow.camera.near = 10; sun.shadow.camera.far = 140;
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.02;
-  sun.shadow.radius = 3; // v3.2 Gemini review: harder shadows for the CoD high-contrast look (was 6)
+  sun.shadow.radius = 5; // v3.10 TERANG SEIMBANG: was 3 — softer shadows, the hard dark edges were part of the silhouette look
   scene.add(sun);
   scene.add(sun.target);
-  const fill = new THREE.DirectionalLight(0xdfeaf5, 0.35); // v3.6: cool sky fill (was 0xffd9b0 warm bounce 0.4)
+  const fill = new THREE.DirectionalLight(0xdfeaf5, 0.55); // v3.10: was 0.35 — cool sky fill from the opposite side so container shadow faces and bot backs stop going black
   fill.position.set(28, 14, 30);
   scene.add(fill);
   scene.fog = new THREE.FogExp2(0xd6e4ee, 0.004); // v3.6 day: pale blue-white haze, thinner than the dusk fog for day clarity

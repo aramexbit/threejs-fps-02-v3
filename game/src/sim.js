@@ -30,6 +30,7 @@ export class Sim {
     this.plantProgress = 0;
     this.defuseProgress = 0;
     this.bombCarrier = null; // bot carrying the bomb when the player is dead
+    this.bombDropped = null; // v3.10: {pos} — bomb on the ground, recoverable
     this.time = 0;
     this.banner = '';
     this.bannerT = 0;
@@ -70,6 +71,7 @@ export class Sim {
     this.bombPos = null;
     this.plantProgress = 0;
     this.defuseProgress = 0;
+    this.bombDropped = null; // v3.10: a dropped bomb never survives the round
     // Respawn everyone.
     const p = this.player;
     p.pos.set(this.map.spawns.solara[0].x, 0, this.map.spawns.solara[0].z);
@@ -153,6 +155,34 @@ export class Sim {
   }
 
   // --- Bomb ----------------------------------------------------------------------
+  // v3.10 (Grok, confirmed): the bomb could VANISH — a carrier killed by a
+  // grenade or by a bot never transferred it, and a dead player with no
+  // living Solara bot just dropped the flag from the game. One funnel now:
+  // hand it to the nearest living Solara bot, else the living player, else
+  // drop it on the ground where anyone on Solara can pick it back up.
+  dropBomb(pos, exclude = null) {
+    // exclude = the bot that just died holding the bomb. Without it a
+    // direct dropBomb() call on a LIVING carrier "transfers" the bomb back
+    // to itself and the ground-drop never happens (probe stage E caught
+    // this: bombDropped stayed null). In the real death paths the carrier
+    // is already dead (alive=false), so the filter is belt-and-braces.
+    const mates = this.bots.filter((b) => b.alive && b.team === 'solara' && b !== exclude);
+    if (mates.length) {
+      let best = mates[0], bd = Infinity;
+      for (const b of mates) {
+        const d = b.pos.distanceTo(pos);
+        if (d < bd) { bd = d; best = b; }
+      }
+      best.isCarrier = true;
+      return;
+    }
+    if (this.player.alive) {
+      this.player.hasBomb = true;
+      return;
+    }
+    this.bombDropped = { pos: new THREE.Vector3(pos.x, 0.3, pos.z) };
+    this.events.push({ type: 'status', text: 'BOMB DROPPED — RECOVER IT', dur: 3 });
+  }
   tryPlantOrDefuse(dt, input) {
     const p = this.player;
     this.defuseTime = p.hasKit ? 2.5 : 5;
@@ -287,11 +317,10 @@ export class Sim {
         });
         this._onPlayerKill(best.part === 'head');
         if (best.bot.isCarrier) {
-          // Bomb drops to the nearest alive Solara bot.
-          const next = this.bots.find((b) => b.alive && b.team === 'solara');
-          if (next) next.isCarrier = true;
-          else this.player.hasBomb = true;
+          // v3.10: carrier killed by a shot — funnel through dropBomb so
+          // the bomb is transferred or dropped, never lost.
           best.bot.isCarrier = false;
+          this.dropBomb(best.bot.pos, best.bot);
         }
         if (this.teamAlive('bastion') === 0 && !this.bombPlanted) {
           this.endRound('solara', 'TEAM ELIMINATED');
@@ -329,11 +358,11 @@ export class Sim {
           type: 'killfeed', killer: bot.name, victim: 'You',
           weapon: WEAPONS[bot.weapon].name, headshot: false,
         });
-        // Bomb drops to a Solara bot.
+        // v3.10: carrier death funnels through dropBomb (was: silently
+        // lost when no Solara bot was alive to take it).
         if (this.player.hasBomb) {
           this.player.hasBomb = false;
-          const next = this.bots.find((b) => b.alive && b.team === 'solara');
-          if (next) next.isCarrier = true;
+          this.dropBomb(this.player.pos, null);
         }
         if (this.teamAlive('solara') === 0 && !this.bombPlanted) {
           this.endRound('bastion', 'TEAM ELIMINATED');
@@ -342,6 +371,11 @@ export class Sim {
     } else if (enemy.bot) {
       const died = enemy.bot.takeDamage(bot.damage);
       if (died) {
+        // v3.10: a carrier bot killed by a bot shot drops/transfers the bomb.
+        if (enemy.bot.isCarrier) {
+          enemy.bot.isCarrier = false;
+          this.dropBomb(enemy.bot.pos, enemy.bot);
+        }
         this.events.push({
           type: 'killfeed', killer: bot.name, victim: enemy.bot.name,
           weapon: WEAPONS[bot.weapon].name, headshot: false,
@@ -401,6 +435,9 @@ export class Sim {
         if (d < blast.radius) {
           const died = b.takeDamage(Math.round(blast.damage * (1 - d / blast.radius)));
           if (died) {
+            // v3.10: a carrier killed by the HE blast used to vanish the
+            // bomb entirely (no transfer on this path at all).
+            if (b.isCarrier) { b.isCarrier = false; this.dropBomb(b.pos, b); }
             this.player.money += 300;
             this.events.push({
               type: 'killfeed', killer: 'You', victim: b.name,
@@ -423,6 +460,10 @@ export class Sim {
         this.phase = 'round';
         this.timer = ROUND_TIME;
         this.setBanner('GO — PLANT THE BOMB', 2);
+        // v3.10: keys pressed during freeze (e.g. R) must not leak into the
+        // round as a surprise reload — the freeze-time R was the stale-key
+        // half of "kadang tidak bisa reload".
+        if (input.clearPressed) input.clearPressed();
       }
     } else if (this.phase === 'round') {
       if (this.bombPlanted) {
@@ -432,6 +473,25 @@ export class Sim {
         this.timer -= dt;
         if (this.timer <= 0) this.endRound('bastion', 'TIME EXPIRED');
       }
+      // v3.10: pick up a dropped bomb — player or a living Solara bot
+      // walking over it becomes the carrier.
+      if (this.bombDropped) {
+        const bp = this.bombDropped.pos;
+        const p = this.player;
+        if (p.alive && Math.hypot(p.pos.x - bp.x, p.pos.z - bp.z) < 1.5) {
+          p.hasBomb = true;
+          this.bombDropped = null;
+          this.events.push({ type: 'status', text: 'BOMB RECOVERED', dur: 2 });
+        } else {
+          const mate = this.bots.find((b) => b.alive && b.team === 'solara'
+            && Math.hypot(b.pos.x - bp.x, b.pos.z - bp.z) < 1.5);
+          if (mate) {
+            mate.isCarrier = true;
+            this.bombDropped = null;
+            this.radio(mate, 'Got the bomb — pushing to the site!', true);
+          }
+        }
+      }
     } else if (this.phase === 'end') {
       this.timer -= dt;
       if (this.timer <= 0) {
@@ -440,6 +500,7 @@ export class Sim {
         } else {
           this.round++;
           this.startRound();
+          if (input.clearPressed) input.clearPressed();
         }
       }
     }
@@ -447,15 +508,31 @@ export class Sim {
     this.tryPlantOrDefuse(dt, input);
     // Player actions.
     const p = this.player;
+    // v3.10: queued clicks from freeze/end/matchEnd never fire later.
+    if (this.phase !== 'round' && input.clickQueue) input.clickQueue = 0;
     if (this.phase === 'round' && p.alive) {
-      if (input.mouseDown) {
+      // v3.10: fire on the held button OR one queued quick click (see
+      // input.js — a click shorter than one sim step used to vanish).
+      if (input.mouseDown || (input.consumeClick && input.consumeClick())) {
         const shot = p.tryFire(this.time, this.rng);
         if (shot) {
           this.resolveShot(shot);
           for (const b of this.bots) if (b.alive) b.hearShot(p.pos);
         }
       }
-      if (input.consume('KeyR')) { if (p.weapon.startReload()) this.audio.reload(); }
+      if (input.consume('KeyR')) {
+        if (p.weapon.startReload()) this.audio.reload();
+        // v3.10: a failed R used to do NOTHING visible — say why, so a
+        // full mag / empty reserve / mid-reload press never reads as a bug.
+        else {
+          const w = p.weapon;
+          this.events.push({
+            type: 'status',
+            text: w.ammo >= w.def.mag ? 'MAG FULL' : w.reserve <= 0 ? 'NO RESERVE AMMO' : 'ALREADY RELOADING',
+            dur: 1.2,
+          });
+        }
+      }
       if (input.consume('KeyG')) p.throwGrenade(this.time);
       if (input.consume('Digit4')) p.cycleGrenade();
       if (input.consume('KeyQ')) p.equip((p.slot + 1) % p.slots.length);
@@ -471,6 +548,7 @@ export class Sim {
     const ctx = {
       player: p, bots: this.bots, map: this.map,
       bombPlanted: this.bombPlanted, bombSite: this.bombSite,
+      bombDropped: this.bombDropped, // v3.10: bots recover/guard a dropped bomb
       time: this.time, phase: this.phase, // v3.8: bots only shoot in 'round'
       smokes: this.smokes,
       siteClear: (site) => this.siteClear(site),

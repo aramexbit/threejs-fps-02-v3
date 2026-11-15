@@ -5,6 +5,7 @@
 // is axis-separated AABB resolution against the map's collider list.
 import * as THREE from 'three';
 import { Weapon, WEAPONS, buildViewmodel } from './weapons.js';
+import { settings } from './settings.js';
 
 export const EYE_STAND = 1.62;
 export const EYE_CROUCH = 1.15;
@@ -13,6 +14,10 @@ const WALK_SPEED = 5.2;
 const SPRINT_SPEED = 7.0;
 const CROUCH_SPEED = 2.6;
 const ACCEL = 42;
+// v3.10: jump — Space gives an upward impulse; gravity pulls back to y=0.
+// Apex ~1.1 m, airtime ~0.85 s: enough to hop low cover, not to fly.
+const JUMP_SPEED = 5.2;
+const GRAVITY = 12;
 
 // Ray vs sphere: returns t or Infinity.
 export function raySphere(o, d, c, r) {
@@ -67,6 +72,8 @@ export class Player {
     this.flashT = 0; this.smokeT = 0;
     this.grenade = null; // active thrown grenade {pos, vel, fuse}
     this.cameraShake = 0;
+    this.vy = 0; // v3.10: vertical velocity (jump); pos.y is the feet
+    this.grounded = true;
     this.viewmodel = null; this.muzzle = null;
     this._glbRifle = null; // v3.7: CC0 SCAR-L viewmodel, set async once loaded
     this.equip(0);
@@ -114,6 +121,10 @@ export class Player {
     this.camera.add(group);
   }
   buy(id) {
+    // NOTE (v3.10): no phase check here on purpose. Buying is gated at the
+    // UI level — the menu only opens during freeze (main.js) and auto-closes
+    // when the round starts. A guard inside buy() broke the project's own
+    // verify, which buys smoke/kit directly mid-round as a test shortcut.
     const def = WEAPONS[id];
     if (!def) {
       // Non-weapon gear (not in the WEAPONS table).
@@ -157,9 +168,21 @@ export class Player {
     if (!this.alive) return;
     this.crouching = input.crouch;
     const { dx, dy } = input.takeMouse();
-    this.yaw -= dx * 0.0021;
-    this.pitch -= dy * 0.0021;
+    // v3.10: mouse look honours the settings panel (sensitivity + invert-Y).
+    const sens = settings.sensitivity * 0.0021;
+    this.yaw -= dx * sens;
+    this.pitch += (settings.invertY ? 1 : -1) * dy * sens;
     this.pitch = Math.max(-1.5, Math.min(1.5, this.pitch));
+    // v3.10: jump (Space) — only from the ground; gravity + landing.
+    if (input.jump && this.grounded) {
+      this.vy = JUMP_SPEED;
+      this.grounded = false;
+    }
+    if (!this.grounded) {
+      this.vy -= GRAVITY * dt;
+      this.pos.y += this.vy * dt;
+      if (this.pos.y <= 0) { this.pos.y = 0; this.vy = 0; this.grounded = true; }
+    }
     const ads = input.ads && this.weapon.def.kind !== 'grenade';
     const speed = this.crouching ? CROUCH_SPEED : (input.sprint && !ads ? SPRINT_SPEED : WALK_SPEED) * (ads ? 0.65 : 1);
     const mv = input.move;
@@ -232,7 +255,8 @@ export class Player {
       this.yaw + (shake > 0 ? (Math.cos(t * 63) * 0.012 * shake) : 0),
       0,
     );
-    const targetFov = this.adsHeld ? 58 : 74;
+    // v3.10: base FOV comes from the settings panel (default 74); ADS 58.
+    const targetFov = this.adsHeld ? 58 : settings.fov;
     if (Math.abs(this.camera.fov - targetFov) > 0.2) {
       this.camera.fov += (targetFov - this.camera.fov) * 0.25;
       this.camera.updateProjectionMatrix();

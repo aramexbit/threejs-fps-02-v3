@@ -7,6 +7,10 @@
 import { WEAPONS } from './weapons.js';
 import { MAX_ROUNDS } from './sim.js';
 
+// Buy-menu weapon images (generated icons in game/assets/buy-icons/).
+// Only the four weapons have images; utility/gear rows stay text-only.
+const BUY_ICONS = { ar77: 'ar77', vex9: 'vex9', longbow: 'longbow', p9: 'p9' };
+
 function el(tag, cls, parent) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -128,7 +132,8 @@ export class HUD {
         price = def.price;
         stats = `DMG ${def.damage} · RPM ${def.rpm} · MAG ${def.mag}`;
       }
-      row.innerHTML = `<span class="buy-name"></span><span class="buy-stats"></span><span class="buy-price"></span>`;
+      const icon = BUY_ICONS[id] ? `<img class="buy-img" src="assets/buy-icons/${BUY_ICONS[id]}.webp" alt="">` : '';
+      row.innerHTML = `${icon}<span class="buy-name"></span><span class="buy-stats"></span><span class="buy-price"></span>`;
       row.querySelector('.buy-name').textContent = row.dataset.label;
       row.querySelector('.buy-stats').textContent = stats;
       row.querySelector('.buy-price').textContent = `$${price}`;

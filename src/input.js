@@ -11,16 +11,23 @@ export class Input {
     this.locked = false;
     this.shotMode = false;
     this.pressed = new Set(); // edge-triggered keys, consumed by sim
+    // v3.10: edge-triggered fire queue. mouseDown is a LEVEL sampled once
+    // per sim step — on a slow machine a quick click (down+up inside one
+    // frame gap) never reaches a sim step and the shot silently vanishes
+    // (the "kadang tidak bisa nembak" the headless 2.5 s-held-click test
+    // could never see). Every real mousedown enqueues one fire attempt;
+    // the sim consumes it on its next step even if the button is up again.
+    this.clickQueue = 0;
     this.onLockChange = onLockChange || (() => {});
     this.canvas = canvas;
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return;
       this.keys.add(e.code);
       this.pressed.add(e.code);
-      if (e.code === 'KeyR' || e.code === 'KeyB' || e.code === 'KeyG' || e.code === 'KeyQ' || e.code === 'Digit1' || e.code === 'Digit2' || e.code === 'Digit3' || e.code === 'Digit4') e.preventDefault();
+      if (e.code === 'KeyR' || e.code === 'KeyB' || e.code === 'KeyG' || e.code === 'KeyQ' || e.code === 'Digit1' || e.code === 'Digit2' || e.code === 'Digit3' || e.code === 'Digit4' || e.code === 'Space') e.preventDefault();
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
-    window.addEventListener('blur', () => { this.keys.clear(); this.mouseDown = false; this.ads = false; });
+    window.addEventListener('blur', () => { this.keys.clear(); this.mouseDown = false; this.ads = false; this.clickQueue = 0; });
     document.addEventListener('mousemove', (e) => {
       if (!this.locked) return;
       this.mouseDX += e.movementX;
@@ -28,7 +35,7 @@ export class Input {
     });
     document.addEventListener('mousedown', (e) => {
       if (e.target !== canvas) return;
-      if (e.button === 0) this.mouseDown = true;
+      if (e.button === 0) { this.mouseDown = true; if (this.clickQueue < 5) this.clickQueue++; }
       if (e.button === 2) this.ads = true;
     });
     document.addEventListener('mouseup', (e) => {
@@ -68,6 +75,18 @@ export class Input {
     if (had) this.pressed.delete(code);
     return had;
   }
+  // v3.10: drop edge-triggered keys (e.g. an R pressed during freeze must
+  // not leak into the round as a surprise reload). Called by sim.js on
+  // every phase transition.
+  clearPressed() {
+    this.pressed.clear();
+  }
+  // v3.10: consume one queued click (see the clickQueue comment above).
+  consumeClick() {
+    if (this.clickQueue <= 0) return false;
+    this.clickQueue--;
+    return true;
+  }
   takeMouse() {
     const dx = this.mouseDX, dy = this.mouseDY;
     this.mouseDX = 0; this.mouseDY = 0;
@@ -80,5 +99,6 @@ export class Input {
   }
   get sprint() { return this.keys.has('ShiftLeft') || this.keys.has('ShiftRight'); }
   get crouch() { return this.keys.has('ControlLeft') || this.keys.has('KeyC'); }
+  get jump() { return this.keys.has('Space'); } // v3.10: Space jumps
   get plantHeld() { return this.keys.has('KeyE'); }
 }

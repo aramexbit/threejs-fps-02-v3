@@ -25,6 +25,7 @@ function radialTexture(inner, outer) {
 export class ParticleSystem {
   constructor(scene, max = 600, size = 0.14) {
     this.max = max;
+    this.active = max; // v3.10: live budget for the Low quality tier
     this.pos = new Float32Array(max * 3);
     this.col = new Float32Array(max * 3);
     this.vel = new Float32Array(max * 3);
@@ -46,9 +47,15 @@ export class ParticleSystem {
     scene.add(this.points);
     this.rnd = mulberry32(777);
   }
+  // v3.10: shrink the live pool for the Low quality tier (or restore it).
+  // Slots above the budget keep y=-999 until the budget grows again.
+  setBudget(n) {
+    this.active = Math.max(50, Math.min(this.max, n | 0));
+    this.head = this.head % this.active;
+  }
   spawn(x, y, z, vx, vy, vz, life, r, g, b, grav = 0) {
     const i = this.head;
-    this.head = (this.head + 1) % this.max;
+    this.head = (this.head + 1) % this.active;
     this.pos[i * 3] = x; this.pos[i * 3 + 1] = y; this.pos[i * 3 + 2] = z;
     this.vel[i * 3] = vx; this.vel[i * 3 + 1] = vy; this.vel[i * 3 + 2] = vz;
     this.col[i * 3] = r; this.col[i * 3 + 1] = g; this.col[i * 3 + 2] = b;
@@ -76,7 +83,7 @@ export class ParticleSystem {
     }
   }
   update(dt) {
-    for (let i = 0; i < this.max; i++) {
+    for (let i = 0; i < this.active; i++) {
       if (this.life[i] <= 0) continue;
       this.life[i] -= dt;
       if (this.life[i] <= 0) { this.pos[i * 3 + 1] = -999; continue; }
@@ -265,6 +272,7 @@ export class ChimneySmoke {
 export class Snowfall {
   constructor(scene, count = 900, area = 60) {
     this.count = count;
+    this.drawCount = count; // v3.10: live budget for the Low quality tier
     this.area = area;
     this.pos = new Float32Array(count * 3);
     this.seed = new Float32Array(count * 2);
@@ -286,8 +294,14 @@ export class Snowfall {
     this.points.frustumCulled = false;
     scene.add(this.points);
   }
+  // v3.10: draw only the first n flakes (Low tier). Positions keep updating
+  // for the hidden ones, so restoring the budget is seamless.
+  setBudget(n) {
+    this.drawCount = Math.max(50, Math.min(this.count, n | 0));
+    this.points.geometry.setDrawRange(0, this.drawCount);
+  }
   update(dt, t, cx, cz) {
-    for (let i = 0; i < this.count; i++) {
+    for (let i = 0; i < this.drawCount; i++) {
       this.pos[i * 3 + 1] -= this.seed[i * 2 + 1] * dt;
       this.pos[i * 3] += Math.sin(t * 0.7 + this.seed[i * 2]) * dt * 0.35;
       if (this.pos[i * 3 + 1] < 0) this.pos[i * 3 + 1] = 20 + (this.seed[i * 2] % 2);
@@ -301,14 +315,16 @@ export class Snowfall {
 }
 
 // --- Tracers: pooled thin additive streaks, muzzle -> impact ----------------
-// One stretched box per shot, oriented along the shot line, fading in ~0.08 s.
-// Gemini realism pass (new CoD urban reference): the red/white streaks
-// crossing the frame are the single biggest "combat chaos" cue.
+// One stretched box per shot, oriented along the shot line.
+// v3.10 (Grok, confirmed by the user): the old 0.08 s life at 0.02 m thick
+// was nearly invisible — a tracer that lives 0.30 s at 0.045 m thick reads
+// as a real streak instead of a flicker.
 export class TracerPool {
   constructor(scene, max = 20) {
     this.max = max;
     this.items = [];
-    const geo = new THREE.BoxGeometry(0.02, 0.02, 1);
+    this.life = 0.30;
+    const geo = new THREE.BoxGeometry(0.045, 0.045, 1);
     for (let i = 0; i < max; i++) {
       const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
         color: 0xfff0aa, transparent: true, opacity: 0,
@@ -328,13 +344,13 @@ export class TracerPool {
     d.mesh.scale.set(1, 1, start.distanceTo(end));
     d.mesh.visible = true;
     d.mesh.material.opacity = 1.0;
-    d.life = 0.08;
+    d.life = this.life;
   }
   update(dt) {
     for (const d of this.items) {
       if (d.life <= 0) continue;
       d.life -= dt;
-      d.mesh.material.opacity = Math.max(0, d.life / 0.08);
+      d.mesh.material.opacity = Math.max(0, d.life / this.life);
       if (d.life <= 0) d.mesh.visible = false;
     }
   }

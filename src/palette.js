@@ -18,4 +18,9 @@ export const PALETTE = {
   enemy: '#e05a4e',
   ally: '#6fc3d8',
 };
-export const TEAM_COLORS = { solara: 0xff7a2f, bastion: 0x6fc3d8 };
+export const TEAM_COLORS = { solara: 0xe0352b, bastion: 0x2f6fd8 };
+// v3.10 "TERANG SEIMBANG" (user pick, middle panel): vivid red vs vivid
+// royal blue — the TERORIS merah vs POLISI biru of the user's team-select
+// design. Was fire orange 0xff7a2f / pale steel teal 0x6fc3d8 — too muted
+// against bright snow; the vests, nameplates and minimap dots all read
+// from here, so the teams stay identifiable at range.

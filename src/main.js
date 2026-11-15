@@ -20,6 +20,7 @@ import { ParticleSystem, MuzzleFlash, DecalPool, Fire, ChimneySmoke, Snowfall, E
 import { mulberry32 } from './rng.js';
 import { loadRifle, loadPine } from './models.js';
 import { setTextureAnisotropy } from './textures.js';
+import { settings, QUALITY } from './settings.js';
 
 const params = new URLSearchParams(location.search);
 const SHOT = params.get('shot'); // start | play | buy | end | null
@@ -29,12 +30,14 @@ window.__shotReady = false;
 const canvas = document.getElementById('game');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 renderer.setSize(innerWidth, innerHeight);
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2)); // v3.7: 1.5 -> 2 (crisper on hidpi)
+// v3.10: pixel ratio + shadows follow the quality setting (Low = 1x, no
+// shadows — the two biggest costs on a weak machine).
+renderer.setPixelRatio(Math.min(devicePixelRatio, QUALITY[settings.quality].pixelRatio));
 setTextureAnisotropy(Math.min(4, renderer.capabilities.getMaxAnisotropy())); // v3.7 fix: back to 4 — 8x starved SwiftShader frames (~2.5 s/frame) and the GLB load stalled the verify's move check; 512-px textures keep most of the sharpness
-renderer.shadowMap.enabled = true;
+renderer.shadowMap.enabled = QUALITY[settings.quality].shadows;
 renderer.shadowMap.type = THREE.PCFShadowMap; // r187 removed PCFSoftShadowMap; PCF + radius 4 is the soft fallback
 renderer.toneMapping = THREE.AgXToneMapping;
-renderer.toneMappingExposure = 1.2; // v3.6 day: 1.3 was tuned for the darker sunset; the bright day sky needs a touch less (1.45 blew the snow out to flat white in v3.1)
+renderer.toneMappingExposure = 1.3; // v3.10 TERANG SEIMBANG: was 1.2 — a touch brighter overall; 1.45 blew the snow out to flat white in v3.1, 1.3 stays short of that
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
@@ -52,7 +55,7 @@ const map = buildMap(scene);
 
 // --- Effects -------------------------------------------------------------------
 const fx = {
-  particles: new ParticleSystem(scene, 700),
+  particles: new ParticleSystem(scene, QUALITY[settings.quality].particles),
   flash: new MuzzleFlash(scene),
   decals: new DecalPool(scene),
   explosion: null,
@@ -65,12 +68,25 @@ for (const spot of map.fireSpots) {
   if (spot.kind === 'chimney') chimneys.push(new ChimneySmoke(scene, spot.pos));
   else fires.push(new Fire(scene, spot.pos, spot.kind === 'furnace' ? 0.8 : spot.kind === 'barrel' ? 0.9 : 1.2));
 }
-const snowfall = new Snowfall(scene, 800);
+const snowfall = new Snowfall(scene, QUALITY[settings.quality].snow);
 
 // --- Actors ----------------------------------------------------------------------
 const rng = mulberry32(SEED);
 const audio = new AudioSys();
-const input = new Input(canvas);
+// v3.10: lock-loss handling — Esc (or any unexpected unlock) while playing
+// opens the pause overlay (Esc itself is swallowed by the browser to exit
+// the lock, so it can never open the settings panel directly). Intentional
+// unlocks (buy menu, settings) set hud.buyOpen / hud.settingsOpen first,
+// so the handler never mistakes them for a pause.
+let started = false;
+const input = new Input(canvas, (locked) => {
+  if (SHOT) return;
+  if (locked) hud.setPauseOpen(false);
+  else if (started && !hud.buyOpen && !hud.settingsOpen) hud.setPauseOpen(true);
+  // v3.10: the gear button is a trap while locked (clicks go to the canvas
+  // and fire the weapon) — hide it whenever the lock is held.
+  hud.setGearVisible(!locked);
+});
 input.shotMode = !!SHOT;
 const player = new Player(scene, camera, map, audio, fx);
 const bots = [];
@@ -80,8 +96,6 @@ for (const n of SOLARA_NAMES) bots.push(new Bot(scene, map, 'solara', n, mulberr
 for (const n of BASTION_NAMES) bots.push(new Bot(scene, map, 'bastion', n, mulberry32(SEED + n.length * 29)));
 const sim = new Sim(map, player, bots, fx, audio, rng);
 sim.startRound();
-// Debug/verification handle (read-only inspection for playtests).
-window.__game = { sim, player, bots, camera };
 
 // Bomb mesh: a dark case with a blinking red light, shown while planted.
 const bombMesh = new THREE.Group();
@@ -103,6 +117,42 @@ scene.add(bombMesh);
 const hud = new HUD(map, player, sim);
 hud.audio = audio;
 
+// v3.10: settings wiring — the panel owns the values (settings singleton),
+// main.js owns the lock + the live applies (same G1 pattern as the buy menu:
+// open releases the lock, close re-locks).
+function openSettings() {
+  hud.setPauseOpen(false);
+  hud.setSettingsOpen(true);
+  // v3.10: the Esc that exited the lock is still sitting in `pressed` —
+  // clear it, or the frame loop's Escape consumer would close the panel
+  // the instant it opens.
+  input.clearPressed();
+  input.exitLock();
+}
+function closeSettings() {
+  hud.setSettingsOpen(false);
+  input.requestLock();
+}
+hud.onOpenSettings = openSettings;
+hud.onCloseSettings = closeSettings;
+hud.onResume = () => { hud.setPauseOpen(false); input.requestLock(); };
+function applyQuality() {
+  const q = QUALITY[settings.quality];
+  renderer.setPixelRatio(Math.min(devicePixelRatio, q.pixelRatio));
+  renderer.shadowMap.enabled = q.shadows;
+  // Toggling shadows at runtime needs a material refresh.
+  scene.traverse((o) => { if (o.material) o.material.needsUpdate = true; });
+  fx.particles.setBudget(q.particles);
+  snowfall.setBudget(q.snow);
+}
+hud.onSettingsChange = (key) => {
+  if (key === 'volume' || key === 'muted') audio.applySettings();
+  else if (key === 'quality') applyQuality();
+  // sensitivity / fov / invertY are read live from the settings singleton.
+};
+// Debug/verification handle (read-only inspection for playtests).
+window.__game = { sim, player, bots, camera, settings, hud };
+
 // --- Post pass (vignette + grade), written from scratch ----------------------------
 // Renders the scene into a target, then a fullscreen triangle samples it.
 // Any failure disables the pass and falls back to direct rendering — the
@@ -122,8 +172,9 @@ void main(){
   c.r = texture2D(tDiffuse, vUv + d * ca).r;
   c.g = texture2D(tDiffuse, vUv).g;
   c.b = texture2D(tDiffuse, vUv - d * ca).b;
-  // S-curve contrast.
-  c = clamp((c - 0.5) * 1.10 + 0.5, 0.0, 1.0);
+  // S-curve contrast (v3.10 TERANG SEIMBANG: was 1.10 — the steeper curve
+  // crushed shadow detail into silhouette; 1.06 keeps contrast without it).
+  c = clamp((c - 0.5) * 1.06 + 0.5, 0.0, 1.0);
   // v3.6 day: near-neutral grade — the teal-orange split tone was tuned
   // for the sunset; in daylight it only tints the snow. A whisper of cool
   // shadows / warm highlights remains.
@@ -131,10 +182,12 @@ void main(){
   vec3 shadowTint = vec3(0.98, 1.00, 1.03);
   vec3 highTint = vec3(1.01, 1.00, 0.99);
   c *= mix(shadowTint, highTint, smoothstep(0.12, 0.78, l));
-  // A touch of saturation (was 1.05 — it pushed the sunset orange further).
-  c = mix(vec3(l), c, 1.02);
-  // Vignette.
-  float vig = 1.0 - r2 * 0.35;
+  // A touch of saturation (v3.10 TERANG SEIMBANG: was 1.02 — vivid team
+  // colours need a little more; 1.06 keeps red/blue from washing out).
+  c = mix(vec3(l), c, 1.06);
+  // Vignette (v3.10: was 0.35 — the dark corners swallowed the viewmodel
+  // rifle and the HUD edges; 0.25 keeps the frame without the gloom).
+  float vig = 1.0 - r2 * 0.25;
   c *= vig;
   // Animated film grain (subtle: +/-1.8%).
   float g = hash(vUv * vec2(1920.0, 1080.0) + fract(uTime * 0.61) * 43.0) - 0.5;
@@ -292,6 +345,10 @@ function frame(now) {
   let dt = Math.min(0.25, (now - last) / 1000);
   last = now;
   if (SHOT) dt = STEP; // deterministic pacing in shot mode
+  // v3.10: Esc closes the settings panel (when unlocked the browser does
+  // deliver the Escape keydown; when locked Esc exits the lock instead and
+  // the pause overlay appears via onLockChange).
+  if (!SHOT && hud.settingsOpen && input.consume('Escape')) closeSettings();
   // Buy menu toggle (freeze only).
   // v3.9: check the phase BEFORE consuming the key. The old order called
   // consume('KeyB') first, so a B press outside freeze was silently eaten.
@@ -387,6 +444,8 @@ const startGame = () => {
   if (SHOT) return;
   audio.ensure();
   hud.hideStart();
+  hud.setPauseOpen(false);
+  started = true;
   input.requestLock();
 };
 canvas.addEventListener('click', startGame);
@@ -402,7 +461,12 @@ setupShot();
 // the old page-load backstop fired __shotReady before the rifle existed,
 // so the "v3.7" screenshots showed the primitive AR-77.
 loadRifle().then((r) => {
-  if (r) player.setGlbRifle(r);
+  if (r) {
+    player.setGlbRifle(r);
+    // v3.10: the same real SCAR-L goes into every bot's hands (cloned —
+    // geometries/materials shared), replacing the boxy procedural rifle.
+    for (const b of bots) b.equipRealRifle(r.group);
+  }
 }).catch(() => {}).finally(() => { modelsSettled = true; });
 setTimeout(() => { modelsSettled = true; }, 15000);
 requestAnimationFrame(frame);

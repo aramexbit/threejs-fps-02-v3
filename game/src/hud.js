@@ -705,7 +705,7 @@ export class HUD {
       else if (!p.alive) msg = '☠ YOU ARE DEAD — wait for the next round';
       else if (w.reloading > 0) msg = 'RELOADING…';
       else if (w.ammo === 0 && w.reserve === 0) msg = 'NO AMMO — buy more next round (B)';
-      if (msg) {
+      if (msg && !this.buyOpen) {
         this.statusMsg.textContent = msg;
         this.statusMsg.classList.remove('hidden');
       } else this.statusMsg.classList.add('hidden');

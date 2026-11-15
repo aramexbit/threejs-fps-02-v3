@@ -194,7 +194,7 @@ export class Fire {
     this.t += dt;
     // Flicker: sum of two sines, deterministic.
     const f = 0.75 + 0.25 * Math.sin(this.t * 11.3) * Math.sin(this.t * 5.1 + 1.7);
-    this.light.intensity = 30 * this.scale * f;
+    this.light.intensity = 24 * this.scale * f; // v3.2: less wash on the snow (was 30)
     for (let i = 0; i < this.flames.length; i++) {
       const s = this.flames[i];
       const w = (0.75 + 0.3 * Math.sin(this.t * 9 + i * 2.1)) * this.scale;

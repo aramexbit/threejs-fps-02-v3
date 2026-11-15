@@ -7,10 +7,10 @@
 // (aerial perspective: far lanes fade into pale haze, never cut to black).
 import * as THREE from 'three';
 
-// Pale winter sun, low in the south-west. Shared by the sky shader, the
-// directional light, and the cold-daylight look.
+// Warm winter sun, low in the south-west. Shared by the sky shader, the
+// directional light, and the warm/cool CoD look: golden sun vs cool shadows.
 export const SUN_DIR = new THREE.Vector3(-0.55, 0.42, -0.72).normalize();
-export const SUN_COLOR = 0xfff2dd;
+export const SUN_COLOR = 0xffd9a6; // v3.2 CoD pass: golden hour warmth (was 0xfff2dd pale)
 export const HORIZON_COLOR = new THREE.Color(0xdce5ee);
 export const ZENITH_COLOR = new THREE.Color(0x91a9c1); // Gemini realism pass: brighter sky (was 0xc7d2dc / 0x5d748e)
 
@@ -34,9 +34,10 @@ void main() {
   float h = clamp(d.y, -0.08, 1.0);
   // Cold daylight gradient: pale horizon, steel blue overhead.
   vec3 col = mix(uHorizon, uZenith, pow(max(h, 0.0), 0.5));
-  // Faint warmth toward the sun's azimuth only — snow stays cold.
-  float toward = pow(max(dot(normalize(vec3(d.x, 0.0, d.z)), normalize(vec3(uSunDir.x, 0.0, uSunDir.z))), 0.0), 3.0);
-  col += uSunColor * toward * (1.0 - pow(max(h, 0.0), 0.6)) * 0.22;
+  // Warmth toward the sun's azimuth — golden light spilling across the
+  // snow, cool blue everywhere else (the CoD warm/cool contrast).
+  float toward = pow(max(dot(normalize(vec3(d.x, 0.0, d.z)), normalize(vec3(uSunDir.x, 0.0, uSunDir.z))), 0.0), 2.0);
+  col += uSunColor * toward * (1.0 - pow(max(h, 0.0), 0.6)) * 0.38;
   // Below the horizon: pale ground haze, not black.
   col = mix(vec3(0.62, 0.66, 0.70), col, smoothstep(-0.08, 0.02, d.y));
   // Pale sun disc + soft halo.
@@ -89,7 +90,7 @@ export function createClouds(seed = 4) {
   for (const [x, y, z, w] of spots) {
     const m = new THREE.Mesh(
       new THREE.PlaneGeometry(w, w * 0.36),
-      new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, fog: false, opacity: 0.5 }),
+      new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, fog: false, opacity: 0.32 }), // v3.2: fainter — cloud planes read as hard diagonal bands (was 0.5)
     );
     m.position.set(x, y, z);
     m.lookAt(0, y * 0.4, 0);
@@ -117,7 +118,7 @@ export function applyEnvironment(renderer, scene, skyMesh) {
 // the vendored core (no examples/jsm), so shadows use PCF + radius —
 // the honest fallback the design doc allows.
 export function createLights(scene) {
-  const hemi = new THREE.HemisphereLight(0xdfe8f2, 0x9aa7b5, 0.95);
+  const hemi = new THREE.HemisphereLight(0xd6e2f0, 0x8d99a8, 0.95); // v3.2: cooler shadows for the warm/cool split
   scene.add(hemi);
   const sun = new THREE.DirectionalLight(SUN_COLOR, 3.2); // Rebalance after v3.1 screenshots: 3.8 clipped snow highlights (was 2.2 in v3)
   sun.position.copy(SUN_DIR).multiplyScalar(60);
@@ -128,10 +129,10 @@ export function createLights(scene) {
   sun.shadow.camera.near = 10; sun.shadow.camera.far = 140;
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.02;
-  sun.shadow.radius = 6; // soft edge (PCF + radius; r187 removed PCFSoft) — Gemini realism pass: softer scattered snow light (was 4)
+  sun.shadow.radius = 3; // v3.2 Gemini review: harder shadows for the CoD high-contrast look (was 6)
   scene.add(sun);
   scene.add(sun.target);
-  const fill = new THREE.DirectionalLight(0xffd9b0, 0.25);
+  const fill = new THREE.DirectionalLight(0xffd9b0, 0.4); // v3.2: stronger warm bounce (was 0.25)
   fill.position.set(28, 14, 30);
   scene.add(fill);
   scene.fog = new THREE.FogExp2(0xdce5ee, 0.005); // Gemini realism pass: thinner fog, bright horizon stays visible (was 0xc7d2dc, 0.008)

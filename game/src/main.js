@@ -105,17 +105,35 @@ hud.audio = audio;
 // game must never die for a cosmetic pass.
 const POST_VERT = `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`;
 const POST_FRAG = `
-varying vec2 vUv; uniform sampler2D tDiffuse;
+// CoD-style grade: teal-orange split tone, S-curve contrast, film grain,
+// subtle chromatic aberration, stronger vignette. Written from scratch.
+varying vec2 vUv; uniform sampler2D tDiffuse; uniform float uTime;
+float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 void main(){
-  vec3 c = texture2D(tDiffuse, vUv).rgb;
-  // Gentle S-curve lift + a touch of saturation for the cold grade.
-  float l = dot(c, vec3(0.299, 0.587, 0.114));
-  c = mix(vec3(l), c, 1.08);
-  c = pow(c, vec3(0.96));
-  // Vignette.
   vec2 d = vUv - 0.5;
-  float vig = 1.0 - dot(d, d) * 0.25; // Gemini realism pass: lighter vignette keeps the frame bright (was 0.55)
-  gl_FragColor = vec4(c * vig, 1.0);
+  float r2 = dot(d, d);
+  // Chromatic aberration: radial, strongest at the frame edges.
+  float ca = 0.004 * r2;
+  vec3 c;
+  c.r = texture2D(tDiffuse, vUv + d * ca).r;
+  c.g = texture2D(tDiffuse, vUv).g;
+  c.b = texture2D(tDiffuse, vUv - d * ca).b;
+  // S-curve contrast.
+  c = clamp((c - 0.5) * 1.10 + 0.5, 0.0, 1.0);
+  // Teal-orange split grade: shadows toward cool teal, highlights warm.
+  float l = dot(c, vec3(0.299, 0.587, 0.114));
+  vec3 shadowTint = vec3(0.93, 1.02, 1.07);
+  vec3 highTint = vec3(1.03, 1.0, 0.97); // v3.2: softer — 1.07 pushed bright snow pink
+  c *= mix(shadowTint, highTint, smoothstep(0.12, 0.78, l));
+  // A touch of saturation.
+  c = mix(vec3(l), c, 1.1);
+  // Vignette.
+  float vig = 1.0 - r2 * 0.35;
+  c *= vig;
+  // Animated film grain (subtle: +/-1.8%).
+  float g = hash(vUv * vec2(1920.0, 1080.0) + fract(uTime * 0.61) * 43.0) - 0.5;
+  c += g * 0.036;
+  gl_FragColor = vec4(c, 1.0);
 }`;
 let postOK = true;
 let rt = null, postScene = null, postCam = null, postMat = null;
@@ -125,7 +143,7 @@ try {
   postCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   postMat = new THREE.ShaderMaterial({
     vertexShader: POST_VERT, fragmentShader: POST_FRAG,
-    uniforms: { tDiffuse: { value: rt.texture } }, depthTest: false, depthWrite: false,
+    uniforms: { tDiffuse: { value: rt.texture }, uTime: { value: 0 } }, depthTest: false, depthWrite: false,
   });
   postScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), postMat));
 } catch {
@@ -143,8 +161,12 @@ function setupShot() {
     player.yaw = -Math.PI / 2 - 0.3;
     player.pitch = 0.02;
   } else if (SHOT === 'play') {
-    // Mid-round: advance the sim 5 s so bots are mid-push and the player is
-    // at mid with the bonfire and crane in frame.
+    // Mid-round: the player has bought the AR-77 (the CoD hero viewmodel),
+    // advance the sim 5 s so bots are mid-push and the player is at mid
+    // with the bonfire and crane in frame.
+    player.money = 10000;
+    player.buy('ar77');
+    player.equip(player.slots.length - 1);
     player.pos.set(-6, 0, 1);
     player.yaw = -Math.PI / 2 - 0.12;
     player.pitch = 0.01;
@@ -216,6 +238,7 @@ function frame(now) {
   // Render (post pass, with direct fallback).
   try {
     if (postOK) {
+      if (postMat) postMat.uniforms.uTime.value = t;
       renderer.setRenderTarget(rt);
       renderer.render(scene, camera);
       renderer.setRenderTarget(null);

@@ -78,7 +78,20 @@ export class Player {
     const { group, muzzle } = buildViewmodel(this.slots[index].def.id);
     this.viewmodel = group;
     this.muzzle = muzzle;
-    group.position.set(0.26, -0.24, -0.45);
+    // CoD-style viewmodel pose: bigger, closer, barrel angled toward the
+    // frame centre. Scale/pose per weapon kind; stock rear must stay in
+    // front of the camera near plane (z < -0.1) or it clips.
+    const pose = {
+      p9: { s: 1.3, x: 0.27, y: -0.25, z: -0.50, ry: 0.06 },
+      vex9: { s: 1.4, x: 0.29, y: -0.26, z: -0.55, ry: 0.10 },
+      ar77: { s: 1.4, x: 0.30, y: -0.27, z: -0.55, ry: 0.12 },
+      longbow: { s: 1.4, x: 0.30, y: -0.27, z: -0.55, ry: 0.10 },
+      he: { s: 1.3, x: 0.26, y: -0.25, z: -0.48, ry: 0.05 },
+    }[this.slots[index].def.id] || { s: 1.3, x: 0.26, y: -0.24, z: -0.45, ry: 0 };
+    this.vmBase = pose;
+    group.scale.setScalar(pose.s);
+    group.rotation.y = pose.ry;
+    group.position.set(pose.x, pose.y, pose.z);
     this.camera.add(group);
   }
   buy(id) {
@@ -194,12 +207,15 @@ export class Player {
     // Viewmodel: ADS pulls it to centre, firing kicks it back, bob sways it.
     if (this.viewmodel) {
       const kick = this.flashT > 0 ? 0.06 : 0;
+      const vm = this.vmBase || { x: 0.26, y: -0.24, z: -0.45 };
       this.viewmodel.position.set(
-        0.26 * (1 - ads) + bobX * 0.4,
-        -0.24 + bobY * 0.5 + (ads ? 0.055 : 0),
-        -0.45 + kick,
+        vm.x * (1 - ads) + bobX * 0.4,
+        vm.y + bobY * 0.5 + (ads ? 0.055 : 0),
+        vm.z + kick,
       );
       this.viewmodel.rotation.x = this.recoilPitch * 1.4 + Math.sin(this.bobPhase) * 0.008;
+      // ADS straightens the rifle so the sight sits dead centre.
+      this.viewmodel.rotation.y = (this.vmBase ? this.vmBase.ry : 0) * (1 - ads);
     }
     this.flashT = Math.max(0, this.flashT - 0.05);
   }

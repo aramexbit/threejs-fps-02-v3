@@ -78,13 +78,15 @@ let _mats = null;
 function mats() {
   if (_mats) return _mats;
   _mats = {
-    gunmetal: new THREE.MeshStandardMaterial({ color: 0x565e68, roughness: 0.42, metalness: 0.85 }),
-    gunmetalLight: new THREE.MeshStandardMaterial({ color: 0x7d8590, roughness: 0.38, metalness: 0.9 }),
+    gunmetal: new THREE.MeshStandardMaterial({ color: 0x707880, roughness: 0.42, metalness: 0.85 }), // v3.2: lighter — the gun read as a black slab (was 0x565e68)
+    gunmetalLight: new THREE.MeshStandardMaterial({ color: 0x9aa1ab, roughness: 0.38, metalness: 0.9 }), // v3.2: brighter edge metal (was 0x7d8590)
     polymer: new THREE.MeshStandardMaterial({ color: 0x1e2124, roughness: 0.85, metalness: 0.1 }),
+    fde: new THREE.MeshStandardMaterial({ color: 0x6b5a44, roughness: 0.8, metalness: 0.05 }), // flat dark earth furniture
+    wornDark: new THREE.MeshStandardMaterial({ color: 0x2a2e33, roughness: 0.6, metalness: 0.6 }), // worn / oiled steel
     wood: new THREE.MeshStandardMaterial({ color: 0x5a4028, roughness: 0.8, metalness: 0.0 }),
     glove: new THREE.MeshStandardMaterial({ color: 0x54483a, roughness: 0.95, metalness: 0.0 }),
     gloveCuff: new THREE.MeshStandardMaterial({ color: 0x6a5f4c, roughness: 0.95, metalness: 0.0 }),
-    glass: new THREE.MeshStandardMaterial({ color: 0x9fc4d8, roughness: 0.1, metalness: 0.4, emissive: 0x1a2c38, transparent: true, opacity: 0.5 }),
+    glass: new THREE.MeshStandardMaterial({ color: 0x9fc4d8, roughness: 0.1, metalness: 0.4, emissive: 0x2a4a5c, transparent: true, opacity: 0.65 }), // v3.2: glass reads (was emissive 0x1a2c38, opacity 0.5)
     reticle: new THREE.MeshBasicMaterial({ color: 0xff2222 }),
   };
   return _mats;
@@ -92,14 +94,16 @@ function mats() {
 
 // Holographic sight (EOTech-style): housing + hollow window + glass with a
 // glowing red reticle dot. The glass/dot face +Z, toward the shooter's eye.
-function holoSight(x, y, z) {
+// `s` scales the whole sight — CoD sights are big and prominent.
+function holoSight(x, y, z, s = 1) {
   const M = mats();
   const g = new THREE.Group();
   g.position.set(x, y, z);
-  g.add(box(0.05, 0.045, 0.08, M.gunmetal, 0, 0, 0)); // housing
+  g.scale.setScalar(s);
+  g.add(box(0.05, 0.045, 0.08, M.gunmetalLight, 0, 0, 0)); // housing, light metal so it reads
   g.add(box(0.04, 0.035, 0.082, M.polymer, 0, 0, 0)); // hollow window interior
   g.add(box(0.038, 0.032, 0.005, M.glass, 0, 0, 0.01)); // glass
-  const dot = new THREE.Mesh(new THREE.CircleGeometry(0.003, 8), M.reticle);
+  const dot = new THREE.Mesh(new THREE.CircleGeometry(0.0055, 8), M.reticle); // v3.2: bigger dot (was 0.003)
   dot.position.set(0, 0, 0.011);
   g.add(dot);
   return g;
@@ -176,23 +180,42 @@ export function buildViewmodel(id) {
     group.add(box(0.045, 0.14, 0.06, M.polymer, 0, -0.095, -0.10, 0.12)); // long mag
     group.add(box(0.05, 0.09, 0.07, M.polymer, 0, -0.065, 0.10, 0.2)); // grip
     group.add(box(0.05, 0.05, 0.12, M.polymer, 0, -0.055, 0.16)); // stock
-    group.add(holoSight(0, 0.06, -0.02)); // holographic sight (Gemini realism pass)
+    group.add(holoSight(0, 0.06, -0.02, 1.35)); // holographic sight (Gemini realism pass), scaled up v3.2
     group.add(box(0.012, 0.02, 0.012, M.gunmetalLight, 0, 0.045, -0.36)); // front post
     group.add(glovedHand(0, -0.07, 0.10, 0.2));
     group.add(glovedHand(0.01, -0.055, -0.16, 0.1)); // support hand on shroud
     muzzle.position.set(0, 0.005, -0.38);
   } else if (id === 'ar77') {
     group.add(box(0.062, 0.075, 0.36, M.gunmetal, 0, 0, -0.02)); // receiver
-    group.add(box(0.055, 0.06, 0.26, M.polymer, 0, -0.005, -0.30)); // handguard
+    group.add(box(0.055, 0.06, 0.26, M.fde, 0, -0.005, -0.30)); // handguard, flat dark earth
     group.add(cyl(0.014, 0.014, 0.22, M.gunmetal, 0, 0.01, -0.50)); // barrel
     group.add(box(0.05, 0.13, 0.07, M.polymer, 0, -0.09, -0.06, 0.22)); // curved mag
+    // Mag ribs + baseplate.
+    group.add(box(0.052, 0.008, 0.072, M.wornDark, 0, -0.06, -0.06));
+    group.add(box(0.052, 0.008, 0.072, M.wornDark, 0, -0.10, -0.06));
+    group.add(box(0.052, 0.012, 0.075, M.polymer, 0, -0.155, -0.06)); // baseplate
     group.add(box(0.05, 0.09, 0.07, M.polymer, 0, -0.065, 0.12, 0.2)); // grip
     group.add(box(0.055, 0.075, 0.16, M.wood, 0, -0.01, 0.24)); // stock
     group.add(box(0.03, 0.02, 0.12, M.gunmetalLight, 0, 0.045, -0.12)); // rail
-    group.add(holoSight(0, 0.07, -0.12)); // holographic sight (Gemini realism pass)
+    // Rail slots.
+    for (let i = 0; i < 3; i++) group.add(box(0.032, 0.006, 0.012, M.wornDark, 0, 0.056, -0.08 - i * 0.04));
+    // Picatinny rail steps along the handguard top (v3.2 Gemini review:
+    // greebling — small edges that catch the sun and break the flat read).
+    for (let i = 0; i < 8; i++) group.add(box(0.05, 0.008, 0.02, M.gunmetalLight, 0, 0.028, -0.18 - i * 0.032));
+    // Trigger + trigger guard (the AR-77 had none — a held weapon needs one).
+    group.add(box(0.012, 0.04, 0.09, M.polymer, 0, -0.055, 0.03, -0.3)); // guard
+    group.add(cyl(0.005, 0.005, 0.03, M.gunmetalLight, 0, -0.05, 0.03, 0)); // trigger
+    group.add(holoSight(0, 0.07, -0.12, 1.35)); // holographic sight (Gemini realism pass), scaled up v3.2
     // Edge wear: light strips along the receiver edges catch the bright sun.
     group.add(box(0.064, 0.005, 0.36, M.gunmetalLight, 0, 0.038, -0.02));
     group.add(box(0.064, 0.005, 0.36, M.gunmetalLight, 0, -0.038, -0.02));
+    // Ejection port recess + bolt + charging handle + selector (right side).
+    group.add(box(0.064, 0.025, 0.09, M.wornDark, 0, 0.01, -0.05)); // ejection port
+    group.add(box(0.066, 0.012, 0.05, M.gunmetalLight, 0, 0.01, -0.05)); // bolt
+    group.add(box(0.02, 0.015, 0.04, M.gunmetalLight, 0.038, 0.005, 0.06)); // charging handle
+    group.add(box(0.066, 0.008, 0.02, M.gunmetalLight, 0, -0.01, 0.04, 0, 0.6)); // selector switch
+    // Vertical foregrip under the handguard.
+    group.add(box(0.035, 0.09, 0.04, M.polymer, 0, -0.075, -0.34, 0.15));
     group.add(box(0.012, 0.022, 0.012, M.gunmetalLight, 0, 0.045, -0.42)); // front post
     group.add(glovedHand(0, -0.07, 0.12, 0.2));
     group.add(glovedHand(0.01, -0.06, -0.28, 0.08)); // support hand

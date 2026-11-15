@@ -89,7 +89,7 @@ export function buildMap(scene) {
   const craneMat = std({ color: 0xa33327, roughness: 0.6, metalness: 0.4 });
   const barkMat = std({ color: 0x4a3a28, roughness: 0.95, metalness: 0 });
   const leafMat = std({ color: 0xc96a24, roughness: 0.9, metalness: 0 });
-  const grassMat = std({ color: 0x9a7d46, roughness: 0.95, metalness: 0, side: THREE.DoubleSide });
+  const grassMat = std({ color: 0x8a713c, roughness: 0.95, metalness: 0, side: THREE.DoubleSide }); // v3.2: darker, less cardboard-orange (was 0x9a7d46)
 
   // --- Ground ----------------------------------------------------------------
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(MAP.w + 30, MAP.h + 30), snowMat);
@@ -272,6 +272,45 @@ export function buildMap(scene) {
     }
   }
 
+  // --- Destroyed wall slab + rebar (v3.2 CoD pass): shattered concrete
+  // panel leaning in mid, visual only (no collider — gameplay unchanged).
+  {
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(2.6, 2.0, 0.3), concMat);
+    slab.position.set(3, 0.85, -2.5);
+    slab.rotation.set(0.15, 0.5, -0.28);
+    slab.castShadow = true; slab.receiveShadow = true;
+    group.add(slab);
+    const sRnd = mulberry32(777);
+    for (let i = 0; i < 4; i++) {
+      const bar = cylAt(steelMat, 0.012, 0.012, 0.9 + sRnd() * 0.5, 3 + (sRnd() - 0.5) * 1.6, 1.3 + sRnd() * 0.6, -2.5 + (sRnd() - 0.5) * 1.2, 6);
+      bar.rotation.set((sRnd() - 0.5) * 1.8, 0, (sRnd() - 0.5) * 1.8);
+      group.add(bar);
+    }
+    // Second rubble field across mid (visual only).
+    for (let i = 0; i < 10; i++) {
+      const cx = i < 5 ? 1 + (sRnd() - 0.5) * 4 : 5 + (sRnd() - 0.5) * 4;
+      const cz = i < 5 ? 3 + (sRnd() - 0.5) * 4 : -4 + (sRnd() - 0.5) * 4;
+      const chunk = new THREE.Mesh(new THREE.DodecahedronGeometry(0.08 + sRnd() * 0.2, 0), concMat);
+      chunk.position.set(cx, 0.08, cz);
+      chunk.rotation.set(sRnd() * Math.PI, sRnd() * Math.PI, sRnd() * Math.PI);
+      chunk.castShadow = true; chunk.receiveShadow = true;
+      group.add(chunk);
+      if (i % 3 === 0) {
+        const bar = cylAt(steelMat, 0.012, 0.012, 0.7, cx, 0.3, cz, 6);
+        bar.rotation.set((sRnd() - 0.5) * 1.6, 0, (sRnd() - 0.5) * 1.6);
+        group.add(bar);
+      }
+    }
+  }
+
+  // --- Burning barrel (v3.2 CoD pass): second fire + smoke column in mid.
+  group.add(cylAt(darkSteel, 0.35, 0.35, 0.9, 3, 0.45, 3, 12));
+  {
+    const crate = boxAt(woodMat, 0.9, 0.9, 0.9, 3.9, 0.45, 2.2, 0.4);
+    crate.rotation.z = 0.2;
+    group.add(crate);
+  }
+
   // --- Bare trees (trunk + naked branches + a few orange leaves) ---------------
   const tree = (x, z, s = 1) => {
     const rnd = mulberry32(Math.round(x * 10 + z));
@@ -314,7 +353,7 @@ export function buildMap(scene) {
 
   // --- Dry grass tufts poking through the snow (non-collidable) ------------------
   const rnd = mulberry32(2024);
-  const grassGeo = new THREE.PlaneGeometry(0.34, 0.3);
+  const grassGeo = new THREE.PlaneGeometry(0.2, 0.45); // v3.2: narrower + taller blades, less cardboard (was 0.34 x 0.3)
   for (let i = 0; i < 140; i++) { // Gemini realism pass: doubled tufts + rubble pebbles (was 70)
     const x = (rnd() - 0.5) * 42, z = (rnd() - 0.5) * 34;
     if (i % 3 === 0) {
@@ -389,8 +428,10 @@ export function buildMap(scene) {
     bounds: { minX: -MAP.halfW, maxX: MAP.halfW, minZ: -MAP.halfH, maxZ: MAP.halfH },
     fireSpots: [
       { pos: new THREE.Vector3(0, 0.4, 6), kind: 'bonfire' },
+      { pos: new THREE.Vector3(3, 0.9, 3), kind: 'bonfire' }, // v3.2: burning barrel in mid
       { pos: new THREE.Vector3(18.2, 1.1, -14.6), kind: 'furnace' },
       { pos: new THREE.Vector3(20.5, 7, 16), kind: 'chimney' },
+      { pos: new THREE.Vector3(15, 4.5, -12), kind: 'chimney' }, // v3.2: smoke column over the foundry
     ],
   };
 }

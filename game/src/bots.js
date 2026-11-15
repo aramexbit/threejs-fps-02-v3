@@ -346,6 +346,24 @@ export class Bot {
   get eye() { return new THREE.Vector3(this.pos.x, this.pos.y + 1.55, this.pos.z); }
   spawnAt(x, z) {
     this.pos.set(x, 0, z);
+    // v3.13 fix: a spawn inside a solid collider traps the bot forever —
+    // the movement code undoes every step while the bot is inside one
+    // (proven 16 Nov: the Bastion carrier spawned at (20,14), inside the
+    // boiler block, and never moved for a whole round). If the spawn point
+    // is inside a collider, nudge out to the nearest clear spot so no map
+    // edit can ever trap a bot again.
+    const inside = (px, pz) => this.map.colliders.some((c) =>
+      px > c.minX - 0.35 && px < c.maxX + 0.35 && pz > c.minZ - 0.35 && pz < c.maxZ + 0.35 && 0 < c.h);
+    if (inside(x, z)) {
+      let placed = false;
+      for (let r = 0.5; r <= 5 && !placed; r += 0.5) {
+        for (let a = 0; a < 8 && !placed; a++) {
+          const nx = x + Math.cos((a / 8) * Math.PI * 2) * r;
+          const nz = z + Math.sin((a / 8) * Math.PI * 2) * r;
+          if (!inside(nx, nz)) { this.pos.set(nx, 0, nz); placed = true; }
+        }
+      }
+    }
     this.lastPos.copy(this.pos);
     this.mesh.position.copy(this.pos);
     this.ammo = WEAPONS[this.weapon].mag; // v3.10: fresh mag each round

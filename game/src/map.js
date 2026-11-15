@@ -18,7 +18,11 @@ export const SITES = {
 };
 export const SPAWNS = {
   solara: [{ x: -20, z: -4 }, { x: -20, z: 0 }, { x: -20, z: 4 }, { x: -18, z: -7 }, { x: -18, z: 7 }],
-  bastion: [{ x: 20, z: -14 }, { x: 20, z: -10 }, { x: 20, z: 10 }, { x: 20, z: 14 }, { x: 18, z: 0 }],
+  // v3.13 fix: (20,14) sat INSIDE the boiler block collider, so the bot
+  // spawned there could never move (proven 16 Nov: the Bastion carrier
+  // Hail spawned there and stayed put for a whole round). (13,16) is clear
+  // ground just west of the block, still on the Bastion side of site B.
+  bastion: [{ x: 20, z: -14 }, { x: 20, z: -10 }, { x: 20, z: 10 }, { x: 13, z: 16 }, { x: 18, z: 0 }],
 };
 
 function std(params) { return new THREE.MeshStandardMaterial(params); }

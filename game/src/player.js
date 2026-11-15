@@ -375,13 +375,13 @@ export class Player {
       if (this._reloadMag) {
         const rm = this._reloadMag;
         const mb = this._magBase || { x: 0, y: -0.13, z: 0.06 };
-        if (reloadP >= 0.2 && reloadP < 0.5) {
+        if (reloadP >= 0.2 && reloadP < 0.55) {
           const q = (reloadP - 0.2) / 0.30;
           rm.visible = true;
           rm.position.set(mb.x - 0.12 * q, mb.y - q * 0.38, mb.z + q * 0.06);
           rm.rotation.x = q * 0.6;
           rm.rotation.z = q * 0.3;
-        } else if (reloadP >= 0.55 && reloadP < 0.9) {
+        } else if (reloadP >= 0.5 && reloadP < 0.9) {
           const q = (reloadP - 0.55) / 0.35;
           rm.visible = true;
           rm.position.set(mb.x - 0.12 * (1 - q), mb.y - 0.38 + q * 0.38, mb.z + 0.06 * (1 - q));

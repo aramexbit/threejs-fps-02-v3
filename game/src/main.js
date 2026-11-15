@@ -59,7 +59,7 @@ const fires = [];
 const chimneys = [];
 for (const spot of map.fireSpots) {
   if (spot.kind === 'chimney') chimneys.push(new ChimneySmoke(scene, spot.pos));
-  else fires.push(new Fire(scene, spot.pos, spot.kind === 'furnace' ? 0.8 : 1.2));
+  else fires.push(new Fire(scene, spot.pos, spot.kind === 'furnace' ? 0.8 : spot.kind === 'barrel' ? 0.9 : 1.2));
 }
 const snowfall = new Snowfall(scene, 800);
 
@@ -125,8 +125,8 @@ void main(){
   vec3 shadowTint = vec3(0.93, 1.02, 1.07);
   vec3 highTint = vec3(1.03, 1.0, 0.97); // v3.2: softer — 1.07 pushed bright snow pink
   c *= mix(shadowTint, highTint, smoothstep(0.12, 0.78, l));
-  // A touch of saturation.
-  c = mix(vec3(l), c, 1.1);
+  // A touch of saturation (was 1.1 — it pushed the sunset orange further).
+  c = mix(vec3(l), c, 1.05);
   // Vignette.
   float vig = 1.0 - r2 * 0.35;
   c *= vig;

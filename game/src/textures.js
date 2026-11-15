@@ -227,12 +227,18 @@ export function containerTextures(tint = [158, 62, 44], seed = 37, size = 256) {
       const rib = 0.5 + 0.5 * Math.sin(u * Math.PI * 2 * 16); // corrugation
       const rust = fbm(u * 5, v * 6, 5, seed, 3);
       const rustBloom = Math.max(0, rust - 0.58) * 2.2;
+      // v3.5: vertical rust streaks running down the ribs — fast noise in u,
+      // slow in v, so the drips read as vertical. Stronger than the bloom
+      // so containers stop looking flat-painted in the low sunset light.
+      const streak = vnoise(u * 48, v * 4, 48, seed + 7);
+      const drip = Math.max(0, streak - 0.60) * 2.4;
+      const rustAmt = Math.min(1, rustBloom + drip * 0.7);
       const edge = Math.min(u, 1 - u, v, 1 - v);
       const wear = Math.max(0, 1 - edge / 0.1);
       const crest = rib > 0.85 ? 0.25 : 0; // paint rubbed off the crests
-      let r = tint[0] * (1 - rustBloom) + 122 * rustBloom;
-      let gg = tint[1] * (1 - rustBloom) + 74 * rustBloom;
-      let b = tint[2] * (1 - rustBloom) + 40 * rustBloom;
+      let r = tint[0] * (1 - rustAmt) + 122 * rustAmt;
+      let gg = tint[1] * (1 - rustAmt) + 74 * rustAmt;
+      let b = tint[2] * (1 - rustAmt) + 40 * rustAmt;
       r = r * (1 - crest) + 150 * crest;
       gg = gg * (1 - crest) + 152 * crest;
       b = b * (1 - crest) + 155 * crest;
@@ -240,7 +246,7 @@ export function containerTextures(tint = [158, 62, 44], seed = 37, size = 256) {
       img.data[i * 4] = r * shade; img.data[i * 4 + 1] = gg * shade; img.data[i * 4 + 2] = b * shade; img.data[i * 4 + 3] = 255;
       height[i] = rib * 0.5 + rust * 0.15;
       ao[i] = 0.8 + rib * 0.1 - wear * 0.2;
-      rough[i] = 0.55 + rustBloom * 0.35; metal[i] = 0.7 - rustBloom * 0.5;
+      rough[i] = 0.55 + rustAmt * 0.35; metal[i] = 0.7 - rustAmt * 0.5;
     }
   }
   g.putImageData(img, 0, 0);

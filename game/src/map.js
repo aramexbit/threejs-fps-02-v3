@@ -102,6 +102,11 @@ export function buildMap(scene) {
   const blueMat = std({ ...contBlue, roughness: 0.55, metalness: 0.7 });
   const greenMat = std({ ...contGreen, roughness: 0.55, metalness: 0.7 });
   const steelMat = std({ color: 0x5a6673, roughness: 0.5, metalness: 0.8 });
+  // v3.5: roof material is warm, rough and non-metallic. The old steelMat
+  // (metalness 0.8) reflected the dark lower hemisphere of the env on its
+  // underside, so the foundry roof read almost black in the plant shot.
+  // This catches hemisphere + furnace fire light instead.
+  const roofMat = std({ color: 0x8a7663, roughness: 0.85, metalness: 0.1 });
   const darkSteel = std({ color: 0x2e3238, roughness: 0.45, metalness: 0.85 });
   const craneMat = std({ color: 0xa33327, roughness: 0.6, metalness: 0.4 });
   const barkMat = std({ color: 0x4a3a28, roughness: 0.95, metalness: 0 });
@@ -500,7 +505,7 @@ export function buildMap(scene) {
     shape.lineTo(0, height);
     shape.closePath();
     const geo = new THREE.ExtrudeGeometry(shape, { depth: len, bevelEnabled: false });
-    const roof = new THREE.Mesh(geo, steelMat);
+    const roof = new THREE.Mesh(geo, roofMat); // v3.5: warm non-metal roof (see roofMat)
     roof.rotation.y = -Math.PI / 2; // extrusion -> world X, shape X -> world Z
     roof.position.set(x + len / 2, y, z);
     roof.castShadow = true; roof.receiveShadow = true;
@@ -523,6 +528,7 @@ export function buildMap(scene) {
   barrelCluster([[-9.7, -9.62], [-8.9, -9.62], [-9.3, -10.15]], 3404); // container (-8,-8) north face
   barrelCluster([[3.62, -7.2], [3.62, -6.3], [3.62, -5.4]], 3405); // container (2,-6) east face
   barrelCluster([[5, -11.38], [6, -11.38], [7, -11.38]], 3406); // container (6,-13) south face
+  barrelCluster([[8, 7.0]], 3407); // v3.5: burn barrel north face of container (8,10) — hugs its collider, no lane cut
 
   // --- Dry grass tufts poking through the snow (non-collidable) ------------------
   const rnd = mulberry32(2024);
@@ -648,6 +654,11 @@ export function buildMap(scene) {
       { pos: new THREE.Vector3(0, 0.4, 6), kind: 'bonfire' },
       { pos: new THREE.Vector3(3, 0.9, 3), kind: 'bonfire' }, // v3.2: burning barrel in mid
       { pos: new THREE.Vector3(18.2, 1.1, -14.6), kind: 'furnace' },
+      // v3.5: burn barrels — two reuse existing barrel meshes/colliders, one
+      // is the new barrel at (8,7). All hug container colliders; no lane cut.
+      { pos: new THREE.Vector3(3.62, 0.9, -6.3), kind: 'barrel' },
+      { pos: new THREE.Vector3(6, 0.9, -11.38), kind: 'barrel' },
+      { pos: new THREE.Vector3(8, 0.9, 7.0), kind: 'barrel' },
       { pos: new THREE.Vector3(20.5, 7, 16), kind: 'chimney' },
       { pos: new THREE.Vector3(15, 4.5, -12), kind: 'chimney' }, // v3.2: smoke column over the foundry
     ],

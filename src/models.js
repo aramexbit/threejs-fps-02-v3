@@ -48,6 +48,9 @@ export function normalizeRifle(gltf) {
   // like the primitive did. Keep the relative shading between the 3 mats.
   // v3.10 TERANG SEIMBANG: lift 0.05 -> 0.10 — the darkest parts ended at
   // ~0.17 and the viewmodel still read as a black slab in the combat shot.
+  // v3.16 Phase 2c: realistic material response — the GLB mats arrive with
+  // metalness 0.4 (painted-plastic read). Name the two steel mats and give
+  // them true metal values; anything else dark becomes polymer furniture.
   group.traverse((o) => {
     if (o.isMesh) {
       o.castShadow = false; o.receiveShadow = false;
@@ -57,6 +60,9 @@ export function normalizeRifle(gltf) {
         m.color.r = Math.min(m.color.r, 0.95);
         m.color.g = Math.min(m.color.g, 0.95);
         m.color.b = Math.min(m.color.b, 0.95);
+        if (m.name === 'MainDark') { m.roughness = 0.45; m.metalness = 0.85; } // gunmetal receiver
+        else if (m.name === 'MainLight') { m.roughness = 0.38; m.metalness = 0.9; } // worn steel barrel/edges
+        else if (m.roughness < 0.9) { m.roughness = 0.85; m.metalness = 0.1; } // polymer furniture
       }
     }
   });

@@ -116,18 +116,19 @@ export class Player {
       // viewmodel so "my weapon" is unmistakable vs the enemy's blue.
       // (Bots carry the same band in their team colour; the old viewmodel
       // had no team colour at all, so all rifles looked identical.)
-      // v3.11: same team markers as the bot rifles (see bots.js) — a top
-      // band is swallowed by the GLB handguard, so the red reads via the
-      // receiver side plates + the mag sleeve instead.
+      // v3.16 Phase 2c: the old team plates (0.30 m slabs on both sides)
+      // + the red mag sleeve swallowed the whole rifle — screenshots
+      // showed a red brick, not a SCAR. Team identity is now one thin
+      // tape stripe on the stock + a narrow ring on the mag baseplate;
+      // the rifle itself reads gunmetal + steel. (Perubahan warna ini
+      // dicatat eksplisit: viewmodel AR-77 tidak lagi merah terang.)
       const teamMat = new THREE.MeshStandardMaterial({ color: 0xe0352b, roughness: 0.5, metalness: 0.3 });
-      for (const sx of [-1, 1]) {
-        const plate = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.12, 0.30), teamMat);
-        plate.position.set(sx * 0.045, 0.02, -0.10); // v3.11: GLB is only +/-0.028 wide — plates hug the receiver
-        group.add(plate);
-      }
-      const sleeve = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.18, 0.18), teamMat);
-      sleeve.position.set(0, -0.13, 0.06);
-      group.add(sleeve);
+      const tape = new THREE.Mesh(new THREE.BoxGeometry(0.062, 0.025, 0.06), teamMat);
+      tape.position.set(0, 0.045, 0.30); // red tape marker on the stock top
+      group.add(tape);
+      const magRing = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.015, 0.10), teamMat);
+      magRing.position.set(0, -0.20, 0.06); // thin red ring at the mag baseplate
+      group.add(magRing);
     } else {
       ({ group, muzzle } = buildViewmodel(this.slots[index].def.id));
     }
@@ -136,11 +137,11 @@ export class Player {
     // v3.12: reload-mag prop — a spare magazine that drops out mid-reload
     // and rises back in as the fresh mag. Driven in applyCamera(); hidden
     // outside a reload. Sits in the mag well (local y -0.13, z 0.06).
-    // v3.13: bigger + team-red so the mag swap actually reads against the
-    // gunmetal (the old dark 0.07 mag vanished inside the GLB rifle).
+    // v3.16 Phase 2c: gunmetal mag (was team-red 0xc22e24 — a red brick
+    // mid-reload); the team accent now lives only on the stock tape.
     const rmag = new THREE.Mesh(
       new THREE.BoxGeometry(0.08, 0.20, 0.12),
-      new THREE.MeshStandardMaterial({ color: 0xc22e24, roughness: 0.5, metalness: 0.4 }),
+      new THREE.MeshStandardMaterial({ color: 0x707880, roughness: 0.45, metalness: 0.8 }),
     );
     rmag.name = 'reload-mag';
     rmag.visible = false;

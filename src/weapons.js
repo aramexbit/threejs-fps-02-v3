@@ -180,6 +180,8 @@ export function buildViewmodel(id) {
     for (let i = 0; i < 5; i++) group.add(box(0.06, 0.052, 0.006, M.polymer, 0, 0, -i * 0.012));
     group.add(box(0.012, 0.018, 0.012, M.gunmetalLight, 0, 0.032, -0.19)); // front sight
     group.add(box(0.03, 0.012, 0.02, M.gunmetalLight, 0, 0.03, 0.02)); // rear sight
+    // v3.16 Phase 2c: fiber-optic front dot (orange, catches the eye in ADS).
+    group.add(box(0.006, 0.006, 0.004, new THREE.MeshBasicMaterial({ color: 0xff7a2f }), 0, 0.034, -0.195));
     group.add(cyl(0.012, 0.012, 0.03, M.gunmetal, 0, 0.005, -0.21)); // muzzle
     group.add(glovedHand(0, -0.08, 0.05, 0.18));
     muzzle.position.set(0, 0.005, -0.23);
@@ -191,6 +193,14 @@ export function buildViewmodel(id) {
     group.add(box(0.05, 0.05, 0.12, M.polymer, 0, -0.055, 0.16)); // stock
     group.add(holoSight(0, 0.06, -0.02, 1.35)); // holographic sight (Gemini realism pass), scaled up v3.2
     group.add(box(0.012, 0.02, 0.012, M.gunmetalLight, 0, 0.045, -0.36)); // front post
+    // v3.16 Phase 2c: ejection port + charging handle + edge wear — the
+    // Vex-9 read as a flat dark slab from the hold angle.
+    group.add(box(0.062, 0.022, 0.08, M.wornDark, 0, 0.012, -0.04)); // ejection port
+    group.add(box(0.02, 0.014, 0.035, M.gunmetalLight, 0.038, 0.005, 0.05)); // charging handle
+    group.add(box(0.062, 0.005, 0.34, M.gunmetalLight, 0, 0.036, -0.05)); // top edge wear
+    group.add(box(0.062, 0.005, 0.34, M.gunmetalLight, 0, -0.036, -0.05)); // bottom edge wear
+    group.add(box(0.047, 0.008, 0.062, M.wornDark, 0, -0.06, -0.10)); // mag ribs
+    group.add(box(0.047, 0.008, 0.062, M.wornDark, 0, -0.10, -0.10));
     group.add(glovedHand(0, -0.07, 0.10, 0.2));
     group.add(glovedHand(0.01, -0.055, -0.16, 0.1)); // support hand on shroud
     muzzle.position.set(0, 0.005, -0.38);
@@ -235,6 +245,12 @@ export function buildViewmodel(id) {
     group.add(cyl(0.02, 0.02, 0.06, M.gunmetalLight, 0, 0.015, -0.76)); // muzzle brake
     group.add(cyl(0.028, 0.028, 0.16, M.gunmetal, 0, 0.055, -0.05, 0, 16)); // scope tube
     group.add(cyl(0.032, 0.032, 0.02, M.glass, 0, 0.055, -0.13, 0, 16)); // scope lens
+    // v3.16 Phase 2c: scope turrets + bigger bolt + cheek rest + edge wear.
+    group.add(cyl(0.012, 0.012, 0.02, M.gunmetalLight, 0, 0.09, -0.05, 0, 10)); // elevation turret
+    group.add(cyl(0.012, 0.012, 0.02, M.gunmetalLight, 0.028, 0.055, -0.05, 0, 10)); // windage turret
+    group.add(box(0.06, 0.03, 0.16, M.fde, 0, 0.02, 0.28)); // cheek rest on the stock
+    group.add(box(0.062, 0.005, 0.42, M.gunmetalLight, 0, 0.041, 0.0)); // receiver edge wear
+    group.add(box(0.062, 0.005, 0.42, M.gunmetalLight, 0, -0.041, 0.0));
     group.add(box(0.045, 0.09, 0.06, M.polymer, 0, -0.085, -0.04, 0.1)); // mag
     group.add(box(0.05, 0.09, 0.07, M.polymer, 0, -0.065, 0.14, 0.2)); // grip
     group.add(box(0.055, 0.08, 0.2, M.wood, 0, -0.01, 0.28)); // wooden stock

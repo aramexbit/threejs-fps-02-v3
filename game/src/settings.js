@@ -7,7 +7,7 @@ export const DEFAULT_SETTINGS = {
   sensitivity: 1.0, // mouse sensitivity multiplier, 0.2–3.0
   volume: 0.8, // master volume 0–1
   muted: false,
-  fov: 74, // base field of view, 60–100 (ADS stays 58)
+  fov: 74, // base field of view, 60–100 (ADS 58, Longbow scope 22)
   invertY: false,
   quality: 'high', // 'low' | 'high' — perf budgets, see QUALITY
   difficulty: 'normal', // v3.13: 'easy' | 'normal' | 'hard' — bot skill, see DIFFICULTY

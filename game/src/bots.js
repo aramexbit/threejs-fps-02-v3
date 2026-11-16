@@ -434,15 +434,35 @@ export class Bot {
     if (prev[dest] === -1) { this.path = [dest]; return; } // unreachable: head for the nearest node
     const path = [];
     let cur = dest;
-    while (cur !== start) { path.unshift(cur); cur = prev[cur]; }
+    // v3.14 (item 4, round 2): the path INCLUDES the start waypoint. The
+    // old code excluded it, so a bot walked STRAIGHT from its real position
+    // to path[0] — and that first leg can cut through a collider no graph
+    // edge crosses. Proven 16 Nov: Hail stood 0.05 m north of a crate
+    // (16,10), path[0] was (16,0) directly south THROUGH the crate, so the
+    // bot faced a head-on wall for 98 s with 60 step calls/s and 0 m moved
+    // (wall slide cannot help a purely axial blocked step). Walking to the
+    // nearest waypoint first keeps every leg on the segment-checked graph.
+    while (true) { path.unshift(cur); if (cur === start) break; cur = prev[cur]; }
     this.path = path;
   }
   stepTowardGoal(dt) {
     const wps = this.map.waypoints;
     const goal = this.goal;
     if (!goal) return;
-    if (!this.path || this.path.length === 0 || this._pathGoal !== goal) {
-      this._pathGoal = goal;
+    // v3.14 (item 4, round 3): recompute the path only when the goal
+    // COORDINATES change, not when the goal OBJECT changes. Several
+    // branches assign a FRESH {x,z} object every frame with identical
+    // coordinates (carrier -> site, defuse, recover, retreat, alert) — the
+    // old identity check (`_pathGoal !== goal`) recomputed the path every
+    // frame, and with the start waypoint included in the path (round 2)
+    // every recompute put the start waypoint — 0.36 m away, inside the
+    // 0.4 m arrival radius — at path[0], so the bot only ever shift()ed
+    // it off and never moved. Proven 16 Nov: Hail frozen 35 s at
+    // (19.2,11.7), 60 calls/s, 0 m moved, while a manual call (same goal
+    // object, no recompute) moved it 3.9 m/s.
+    if (!this.path || this.path.length === 0 || !this._pathGoal
+      || this._pathGoal.x !== goal.x || this._pathGoal.z !== goal.z) {
+      this._pathGoal = { x: goal.x, z: goal.z };
       this._computePath();
     }
     // Final leg: no more waypoints — steer straight at the goal.
@@ -451,19 +471,16 @@ export class Bot {
     const dist = Math.hypot(dx, dz);
     if (dist > 0.4) {
       const sp = BOT_SPEED * (this.state === 'retreat' ? 1.15 : 1);
-      this.pos.x += (dx / dist) * sp * dt;
-      this.pos.z += (dz / dist) * sp * dt;
       this.yaw = Math.atan2(-dx, -dz); // v3.11: no +PI — that faced bots exactly backwards (facing-check cos -1.0)
-      // Simple collision: stop at colliders.
-      for (const c of this.map.colliders) {
-        if (this.pos.x > c.minX - 0.35 && this.pos.x < c.maxX + 0.35
-          && this.pos.z > c.minZ - 0.35 && this.pos.z < c.maxZ + 0.35
-          && this.pos.y < c.h) {
-          this.pos.x -= (dx / dist) * sp * dt;
-          this.pos.z -= (dz / dist) * sp * dt;
-          break;
-        }
-      }
+      // v3.14 (item 4): axis-separated movement — WALL SLIDE. The old code
+      // moved diagonally then undid the WHOLE step when the landing spot
+      // was inside a collider: a bot whose direct line to the next
+      // waypoint grazed a rock (e.g. the (-13,-9) boulder) made zero
+      // progress forever while the stuck handler recomputed the same path
+      // (diagnosed 16 Nov: Cinder, 60 step calls/s, 0 m moved, 98 s idle).
+      // Now each axis moves when ITS landing spot is clear, so the bot
+      // slides along the obstacle instead of stopping dead.
+      this._tryMove((dx / dist) * sp * dt, (dz / dist) * sp * dt);
     } else if (this.path.length > 0) {
       this.path.shift();
     } else if (Math.hypot(goal.x - this.pos.x, goal.z - this.pos.z) < 1.2) {
@@ -481,6 +498,50 @@ export class Bot {
       }
       this.lastPos.copy(this.pos);
     }
+  }
+  // Axis-separated step with the same 0.35 m body margin as the old
+  // all-or-nothing check — but each axis moves when ITS landing spot is
+  // clear, so a bot slides along a wall instead of stopping dead.
+  // v3.14 (item 4, round 2): EJECT. _separateBodies can shove a bot INSIDE
+  // an expanded collider (it had no collision check) — proven 16 Nov:
+  // Frost sat 103 s inside a barrel box (6,-11.38), Sleet 74 s inside the
+  // (6,-13) container box, and inside a box EVERY step is blocked, so the
+  // wall slide cannot help. If the bot's current spot is inside a box,
+  // snap it out along the smallest-penetration axis first.
+  _tryMove(dx, dz) {
+    const blocked = (x, z) => this.map.colliders.some((c) =>
+      x > c.minX - 0.35 && x < c.maxX + 0.35 && z > c.minZ - 0.35 && z < c.maxZ + 0.35 && this.pos.y < c.h);
+    for (const c of this.map.colliders) {
+      if (this.pos.y >= c.h) continue;
+      const l = this.pos.x - (c.minX - 0.35), r = (c.maxX + 0.35) - this.pos.x;
+      const t = this.pos.z - (c.minZ - 0.35), b = (c.maxZ + 0.35) - this.pos.z;
+      if (l > 0 && r > 0 && t > 0 && b > 0) {
+        const m = Math.min(l, r, t, b);
+        if (m === l) this.pos.x = c.minX - 0.36;
+        else if (m === r) this.pos.x = c.maxX + 0.36;
+        else if (m === t) this.pos.z = c.minZ - 0.36;
+        else this.pos.z = c.maxZ + 0.36;
+        break;
+      }
+    }
+    if (!blocked(this.pos.x + dx, this.pos.z)) this.pos.x += dx;
+    if (!blocked(this.pos.x, this.pos.z + dz)) this.pos.z += dz;
+  }
+  // Close-quarters strafe: sidestep perpendicular to the enemy, flipping
+  // direction every ~1.2 s, so a bot in a firefight keeps moving instead
+  // of planting its feet.
+  _strafe(dt, enemy) {
+    this._strafeT = (this._strafeT || 0) - dt;
+    if (this._strafeT <= 0) { this._strafeT = 1.2; this._strafeDir = (this._strafeDir || 1) * -1; }
+    const dx = enemy.pos.x - this.pos.x, dz = enemy.pos.z - this.pos.z;
+    const d = Math.hypot(dx, dz) || 1;
+    const s = this._strafeDir || 1;
+    this._tryMove((-dz / d) * s * 1.6 * dt, (dx / d) * s * 1.6 * dt);
+    this.yaw = Math.atan2(-dx, -dz); // v3.11: no +PI
+  }
+  _isObjectiveState() {
+    return this.state === 'plant' || this.state === 'defuse' || this.state === 'recover'
+      || this.state === 'guard' || this.state === 'retreat';
   }
   canSee(targetPos, maxDist = 30) {
     const from = this.eye;
@@ -607,7 +668,14 @@ export class Bot {
       const bs = ctx.map.sites[ctx.bombSite].center;
       if (isAttacker) {
         this.state = 'hold';
-        this.goal = { x: bs.x + (this.rng() - 0.5) * 6, z: bs.z + (this.rng() - 0.5) * 6 };
+        // v3.14 (item 4): the hold goal used to re-randomize EVERY frame,
+        // so the BFS path recomputed every frame and the bot jittered
+        // without ever committing to a spot. Re-roll only on arrival or
+        // every 5 s, like every other goal assignment.
+        if (!this.goal || this.retargetTimer <= 0) {
+          this.goal = { x: bs.x + (this.rng() - 0.5) * 6, z: bs.z + (this.rng() - 0.5) * 6 };
+          this.retargetTimer = 5;
+        }
       } else {
         this.state = 'defuse';
         this.goal = { x: bs.x, z: bs.z };
@@ -623,7 +691,12 @@ export class Bot {
       // to the site, always.
       if (this.isCarrier && sitePos && ctx.siteClear(this.site, this.team)) {
         this.state = 'plant';
-        this.goal = { x: sitePos.x, z: sitePos.z };
+        // v3.14 (item 4, round 3): only assign a new goal object when the
+        // target actually changes — a fresh object every frame forced a
+        // full BFS recompute every frame (see stepTowardGoal).
+        if (!this.goal || this.goal.x !== sitePos.x || this.goal.z !== sitePos.z) {
+          this.goal = { x: sitePos.x, z: sitePos.z };
+        }
       } else if (!this.isCarrier && this.quietTimer > 6 && (!this.goal || this.retargetTimer <= 0)) {
         // v3.10 HUNT (threshold 10 s -> 6 s in v3.13): stop shuffling
         // around the same site goal and sweep the lanes / last-seen spot.
@@ -690,13 +763,36 @@ export class Bot {
       this.channel = Math.max(0, this.channel - dt * 1.0);
     }
     // --- Movement ----------------------------------------------------------------
+    // v3.14 (item 4): bots MUST keep moving. The old gate (move only when
+    // NO enemy is visible) froze every bot in a standoff: a visible enemy
+    // 25 m away pinned the bot in place for the whole round (diagnosed
+    // 16 Nov: Sleet/Storm idle 67 s in 'engage', seeing an enemy 94-98%
+    // of the round). Objective bots (plant/defuse/recover/guard/retreat)
+    // keep walking to their objective even under fire; everyone else
+    // closes distance to a far enemy (>10 m) or strafes a close one.
     if (this.state === 'retreat') {
       const spawn = this.team === 'solara' ? ctx.map.spawns.solara[0] : ctx.map.spawns.bastion[0];
       this.goal = { x: spawn.x, z: spawn.z };
     }
-    if (this.goal && !enemy) this.stepTowardGoal(dt);
-    else if (this.goal && enemy && this.state !== 'engage') {
-      // Strafe slightly while engaging instead of walking into the open.
+    this._engageGoalT = Math.max(0, (this._engageGoalT || 0) - dt);
+    if (this.goal) {
+      if (enemy && !this._isObjectiveState()) {
+        const d = this.pos.distanceTo(enemy.pos);
+        if (d > 10) {
+          // Close the distance — refresh the chase goal at most twice a
+          // second so the BFS path is not recomputed every frame.
+          if (this._engageGoalT <= 0) {
+            this.goal = { x: enemy.pos.x, z: enemy.pos.z };
+            this._engageGoalT = 0.5;
+          }
+          this.stepTowardGoal(dt);
+        } else {
+          this._strafe(dt, enemy);
+        }
+      } else {
+        this.stepTowardGoal(dt);
+      }
+    } else if (enemy) {
       this.yaw = Math.atan2(-(enemy.pos.x - this.pos.x), -(enemy.pos.z - this.pos.z)); // v3.11: no +PI
     }
     // --- Combat (blinded bots cannot shoot; throwing bots hold fire) --------

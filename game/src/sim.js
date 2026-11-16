@@ -151,6 +151,7 @@ export class Sim {
     p.pos.set(this.map.spawns.solara[0].x, 0, this.map.spawns.solara[0].z);
     p.yaw = -Math.PI / 2; p.pitch = 0;
     p.hp = 100; p.alive = true; p.armor = p.armor; // armor carries over
+    p.diedAt = null; // v3.14 (item 2): death cam resets every round
     for (const w of p.slots) { w.ammo = w.def.mag; w.reserve = w.def.reserve; w.reloading = 0; }
     // v3.13: the bomb belongs to the ATTACKING team this round. Solara
     // attacks: the player carries it (item 1). Bastion attacks: a Bastion
@@ -418,15 +419,27 @@ export class Sim {
         const dmg = Math.round(DMG * (1 - pd / R) * 0.5);
         this._addDamage(thrower, this.player, dmg);
         const died = this.player.damage(dmg, 'torso');
+        this.audio.hurt(); // v3.14 (item 3): enemy grenade hits thud too
         if (died) {
+          this.player.diedAt = this.time; // v3.14 (item 2)
           this._addKill(thrower, this.player, false);
+          this.events.push({ type: 'playerDied', killer: thrower.name, weapon: 'HE' });
           this.events.push({ type: 'killfeed', killer: thrower.name, victim: 'You', weapon: 'HE', headshot: false });
           if (this.player.hasBomb) { this.player.hasBomb = false; this.dropBomb(this.player.pos, null); }
           if (this.teamAlive('solara') === 0 && !this.bombPlanted) this.endRound('bastion', 'TEAM ELIMINATED');
         }
       } else if (thrower === this.player) {
         // Own grenade: half self-damage, no stats, no kill credit.
-        this.player.damage(Math.round(DMG * (1 - pd / R) * 0.5), 'torso');
+        const died = this.player.damage(Math.round(DMG * (1 - pd / R) * 0.5), 'torso');
+        this.audio.hurt();
+        if (died) {
+          // v3.14 (item 2): blowing yourself up used to kill the player
+          // with NO death event at all — no killer line, no death cam.
+          this.player.diedAt = this.time;
+          this.events.push({ type: 'playerDied', killer: 'Granat sendiri', weapon: 'HE' });
+          if (this.player.hasBomb) { this.player.hasBomb = false; this.dropBomb(this.player.pos, null); }
+          if (this.teamAlive('solara') === 0 && !this.bombPlanted) this.endRound('bastion', 'TEAM ELIMINATED');
+        }
       }
     }
     if (this.teamAlive('bastion') === 0 && !this.bombPlanted && this.phase === 'round') {
@@ -540,9 +553,12 @@ export class Sim {
     if (enemy.isPlayer) {
       this._addDamage(bot, this.player, bot.damage); // v3.13: match stats
       const died = this.player.damage(bot.damage, 'torso');
+      this.audio.hurt(); // v3.14 (item 3): every enemy hit on the player thuds
       this.events.push({ type: 'damage', amount: bot.damage });
       if (died) {
+        this.player.diedAt = this.time; // v3.14 (item 2): death cam clock
         this._addKill(bot, this.player, false); // v3.13
+        this.events.push({ type: 'playerDied', killer: bot.name, weapon: WEAPONS[bot.weapon].name });
         this.events.push({
           type: 'killfeed', killer: bot.name, victim: 'You',
           weapon: WEAPONS[bot.weapon].name, headshot: false,
@@ -766,6 +782,20 @@ export class Sim {
   // from each other (half each) and away from the player (bot moves, the
   // player is user-controlled). Mesh x/z are re-synced so the visual never
   // lags a step behind; y (walk bob) is left to _syncMesh.
+  // v3.14 (item 4, round 2): the push is COLLIDER-AWARE, axis by axis.
+  // The old blind push could shove a bot INSIDE an expanded collider box
+  // — proven 16 Nov: Frost pinned 103 s inside a barrel box, Sleet 74 s
+  // inside a container box, and inside a box every _tryMove step is
+  // blocked. A push component whose landing spot is blocked is skipped.
+  _bodyBlocked(x, z, y) {
+    return this.map.colliders.some((c) =>
+      x > c.minX - 0.35 && x < c.maxX + 0.35 && z > c.minZ - 0.35 && z < c.maxZ + 0.35 && y < c.h);
+  }
+  _pushBody(b, dx, dz) {
+    if (!this._bodyBlocked(b.pos.x + dx, b.pos.z, b.pos.y)) b.pos.x += dx;
+    if (!this._bodyBlocked(b.pos.x, b.pos.z + dz, b.pos.y)) b.pos.z += dz;
+    b.mesh.position.x = b.pos.x; b.mesh.position.z = b.pos.z;
+  }
   _separateBodies() {
     const MIN = 0.7; // body-radius sum: ~0.35 m per body
     const alive = this.bots.filter((b) => b.alive);
@@ -782,10 +812,8 @@ export class Sim {
           const d = Math.sqrt(d2);
           const push = (MIN - d) / 2;
           const nx = d > 1e-6 ? dx / d : 1, nz = d > 1e-6 ? dz / d : 0;
-          a.pos.x -= nx * push; a.pos.z -= nz * push;
-          c.pos.x += nx * push; c.pos.z += nz * push;
-          a.mesh.position.x = a.pos.x; a.mesh.position.z = a.pos.z;
-          c.mesh.position.x = c.pos.x; c.mesh.position.z = c.pos.z;
+          this._pushBody(a, -nx * push, -nz * push);
+          this._pushBody(c, nx * push, nz * push);
         }
       }
       const p = this.player;
@@ -797,9 +825,7 @@ export class Sim {
           const d = Math.sqrt(d2);
           const push = MIN - d;
           const nx = d > 1e-6 ? dx / d : 1, nz = d > 1e-6 ? dz / d : 0;
-          b.pos.x += nx * push;
-          b.pos.z += nz * push;
-          b.mesh.position.x = b.pos.x; b.mesh.position.z = b.pos.z;
+          this._pushBody(b, nx * push, nz * push);
         }
       }
     }

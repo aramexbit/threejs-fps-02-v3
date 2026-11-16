@@ -72,6 +72,7 @@ export class Player {
     this.flashT = 0; this.smokeT = 0;
     this.grenade = null; // active thrown grenade {pos, vel, fuse}
     this.cameraShake = 0;
+    this.diedAt = null; // v3.14 (item 2): sim time of the killing blow (death cam)
     this.vy = 0; // v3.10: vertical velocity (jump); pos.y is the feet
     this.grounded = true;
     this.viewmodel = null; this.muzzle = null;
@@ -301,20 +302,35 @@ export class Player {
     const bobX = Math.cos(this.bobPhase) * bob * 0.6;
     const shake = this.cameraShake > 0 ? this.cameraShake : 0;
     this.cameraShake = Math.max(0, this.cameraShake - 0.03);
+    // v3.14 (item 2): DEATH CAM — when killed, the camera drops to the
+    // ground and rolls sideways over ~0.9 s instead of freezing at eye
+    // height behind the "YOU ARE DEAD" box. diedAt is set by sim.js at
+    // the killing blow; without it the drop is instant (old saves/probes).
+    let deathEase = 0;
+    if (!this.alive) {
+      const since = this.diedAt != null ? t - this.diedAt : 99;
+      deathEase = Math.min(1, Math.max(0, since / 0.9));
+      deathEase = deathEase * deathEase * (3 - 2 * deathEase); // smoothstep
+    }
     this.camera.position.set(
-      this.pos.x + bobX * Math.cos(this.yaw),
-      this.eyeY + bobY,
-      this.pos.z - bobX * Math.sin(this.yaw),
+      this.pos.x + bobX * Math.cos(this.yaw) * (1 - deathEase),
+      (this.eyeY + bobY) * (1 - deathEase) + 0.45 * deathEase,
+      this.pos.z - bobX * Math.sin(this.yaw) * (1 - deathEase),
     );
     const ads = this.adsHeld ? 1 : 0;
     this.camera.rotation.order = 'YXZ';
     this.camera.rotation.set(
-      this.pitch + this.recoilPitch + (shake > 0 ? (Math.sin(t * 71) * 0.012 * shake) : 0),
+      this.pitch - 0.25 * deathEase + this.recoilPitch + (shake > 0 ? (Math.sin(t * 71) * 0.012 * shake) : 0),
       this.yaw + (shake > 0 ? (Math.cos(t * 63) * 0.012 * shake) : 0),
-      0,
+      0.5 * deathEase,
     );
-    // v3.10: base FOV comes from the settings panel (default 74); ADS 58.
-    const targetFov = this.adsHeld ? 58 : settings.fov;
+    // v3.14 (item 1): Longbow-7 ADS is a real SCOPE — FOV 22 (~3.4x zoom),
+    // not the 74->58 nudge every weapon got. That nudge was the whole
+    // reason "scope tidak berfungsi": the zoom was barely visible and
+    // there was no scope overlay at all. Other weapons keep ADS 58.
+    // Dead players never stay scoped (the zoom releases on death).
+    const isScoped = this.alive && this.adsHeld && this.weapon && this.weapon.def.zoom;
+    const targetFov = isScoped ? 22 : this.adsHeld ? 58 : settings.fov;
     if (Math.abs(this.camera.fov - targetFov) > 0.2) {
       this.camera.fov += (targetFov - this.camera.fov) * 0.25;
       this.camera.updateProjectionMatrix();
@@ -358,9 +374,13 @@ export class Player {
         else swing = 1 - (tp - 0.7) / 0.3;
         // The hand is empty after the release point (t = 0.15 s).
         this.viewmodel.visible = tp < 0.33;
-      } else if (this.viewmodel.visible === false && !this.throwAnim) {
+      } else if (this.alive && this.viewmodel.visible === false && !this.throwAnim) {
         this.viewmodel.visible = true;
       }
+      // v3.14: scoped — hide the viewmodel entirely (at FOV 22 the rifle
+      // would fill the frame as a giant slab; the scope overlay is the
+      // whole sight picture). Dead — the gun is dropped on death.
+      if ((isScoped || !this.alive) && this.viewmodel) this.viewmodel.visible = false;
       this.viewmodel.position.set(
         vm.x * (1 - ads) + bobX * 0.4 * (1 - dip * 0.7),
         vm.y + bobY * 0.5 * (1 - dip * 0.7) + (ads ? 0.055 + lift : 0) - dip * rd + swing * 0.10,

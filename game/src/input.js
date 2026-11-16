@@ -18,12 +18,6 @@ export class Input {
     // could never see). Every real mousedown enqueues one fire attempt;
     // the sim consumes it on its next step even if the button is up again.
     this.clickQueue = 0;
-    // v3.15: touch controls (touch.js) drive the same channels as
-    // keyboard/mouse — one input model, two devices. Touch look feeds
-    // mouseDX/mouseDY so settings.sensitivity applies to it in
-    // player.update, exactly like mouse look.
-    this._touchF = 0; this._touchS = 0;
-    this.touchMode = false; // set by main.js when touch UI is active
     this.onLockChange = onLockChange || (() => {});
     this.canvas = canvas;
     window.addEventListener('keydown', (e) => {
@@ -61,7 +55,7 @@ export class Input {
     canvas.addEventListener('click', () => this.requestLock());
   }
   requestLock() {
-    if (this.shotMode || this.locked || this.touchMode) return; // v3.15: touch players never lock the pointer
+    if (this.shotMode || this.locked) return;
     try {
       const p = this.canvas.requestPointerLock();
       // v3.9 (Gemini G1): Chrome returns a Promise that rejects without a
@@ -104,26 +98,10 @@ export class Input {
     return { dx, dy };
   }
   get move() {
-    const f = (this.keys.has('KeyW') ? 1 : 0) - (this.keys.has('KeyS') ? 1 : 0) + this._touchF;
-    const s = (this.keys.has('KeyD') ? 1 : 0) - (this.keys.has('KeyA') ? 1 : 0) + this._touchS;
+    const f = (this.keys.has('KeyW') ? 1 : 0) - (this.keys.has('KeyS') ? 1 : 0);
+    const s = (this.keys.has('KeyD') ? 1 : 0) - (this.keys.has('KeyA') ? 1 : 0);
     return { f: Math.max(-1, Math.min(1, f)), s: Math.max(-1, Math.min(1, s)) };
   }
-  // v3.15: touch-control API (touch.js). Same channels as keyboard/mouse.
-  setTouchMove(f, s) {
-    this._touchF = Math.max(-1, Math.min(1, f));
-    this._touchS = Math.max(-1, Math.min(1, s));
-  }
-  touchLook(dx, dy) { this.mouseDX += dx; this.mouseDY += dy; }
-  touchFire(down) {
-    this.mouseDown = down;
-    if (down && this.clickQueue < 5) this.clickQueue++;
-  }
-  touchAds(down) { this.ads = down; }
-  touchKey(code, down) {
-    if (down) this.keys.add(code);
-    else this.keys.delete(code);
-  }
-  touchPress(code) { this.pressed.add(code); }
   get sprint() { return this.keys.has('ShiftLeft') || this.keys.has('ShiftRight'); }
   get crouch() { return this.keys.has('ControlLeft') || this.keys.has('KeyC'); }
   get jump() { return this.keys.has('Space'); } // v3.10: Space jumps

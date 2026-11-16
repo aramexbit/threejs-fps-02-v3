@@ -14,7 +14,6 @@ import { Player } from './player.js';
 import { Bot } from './bots.js';
 import { Sim } from './sim.js';
 import { Input } from './input.js';
-import { TouchControls } from './touch.js'; // v3.15: Android touch controls
 import { HUD } from './hud.js';
 import { AudioSys } from './audio.js';
 import { ParticleSystem, MuzzleFlash, DecalPool, Fire, ChimneySmoke, Snowfall, Explosion, TracerPool } from './effects.js';
@@ -119,11 +118,6 @@ scene.add(bombMesh);
 // --- HUD -------------------------------------------------------------------------
 const hud = new HUD(map, player, sim);
 hud.audio = audio;
-// v3.15: touch controls — created after the HUD (it rewrites the start
-// screen's control list for touch). On touch devices the pointer is never
-// locked (input.touchMode gates requestLock).
-const touch = new TouchControls(input, hud);
-input.touchMode = touch.enabled;
 
 // v3.10: settings wiring — the panel owns the values (settings singleton),
 // main.js owns the lock + the live applies (same G1 pattern as the buy menu:
@@ -183,7 +177,7 @@ hud.onSettingsChange = (key) => {
   // sensitivity / fov / invertY are read live from the settings singleton.
 };
 // Debug/verification handle (read-only inspection for playtests).
-window.__game = { sim, player, bots, camera, settings, hud, touch, input, map, renderer, scene };
+window.__game = { sim, player, bots, camera, settings, hud, input, map, renderer, scene };
 
 // --- Post pass (vignette + grade), written from scratch ----------------------------
 // Renders the scene into a target, then a fullscreen triangle samples it.

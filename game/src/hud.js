@@ -23,16 +23,22 @@ export class HUD {
   constructor(map, player, sim) {
     this.map = map; this.player = player; this.sim = sim;
     this.root = el('div', 'hud', document.body);
-    // --- Minimap (v3.15: top-RIGHT, tactical) ---
+    // --- Minimap (v3.16 Phase 3a: TOP-LEFT, square, dark — reference-style) ---
     const mmWrap = el('div', 'minimap-wrap', this.root);
     this.minimap = el('canvas', 'minimap', mmWrap);
     this.minimap.width = 168; this.minimap.height = 168;
     this.mm = this.minimap.getContext('2d');
-    // --- v3.15: COMPASS (top-centre) — canvas 2D, drawn every frame from
-    // the player's yaw + real site/enemy/bomb positions (never static).
+    // --- v3.16 Phase 3a: map location label under the minimap (reference:
+    // "HOLLOWVENT - PUMP HALL"). Zone from the player's real position.
+    this.mapLabel = el('div', 'maplabel', this.root);
+    this._mapLabel = '';
+    // --- v3.15: COMPASS (top-centre, below the score bar) — canvas 2D,
+    // drawn every frame from the player's yaw + real site/enemy/bomb
+    // positions (never static). Slimmer in 3a (280 px) so the top cluster
+    // stays light.
     const compassWrap = el('div', 'compass', this.root);
     this.compass = el('canvas', '', compassWrap);
-    this.compass.width = 340; this.compass.height = 34;
+    this.compass.width = 280; this.compass.height = 34;
     this.cx = this.compass.getContext('2d');
     // --- v3.15: damage-direction indicator — 4 arcs around the crosshair.
     // The lit arc points at where the shot came from (front/right/back/
@@ -42,12 +48,17 @@ export class HUD {
     this._dmgArcs = {};
     for (const d of ['n', 'e', 's', 'w']) this._dmgArcs[d] = el('div', `dmg-arc dmg-${d}`, this.dmgDir);
     this._dmgDirT = 0;
-    // --- Score + round (top-centre) ---
+    // --- Score + round (v3.16 Phase 3a: ONE top-centre bar, reference-style:
+    // SOLARA 1 · LIVE · 1:26 · ROUND 6/9 · 4 BASTION). The timer div moves
+    // INSIDE the bar (class .timer kept, so probes/verify keep working).
     const score = el('div', 'score', this.root);
     this.scoreSol = el('span', 'score-sol', score);
+    this.scoreStatus = el('span', 'score-status', score);
+    this._scoreStatus = '';
     this.scoreMid = el('span', 'score-mid', score);
     this.scoreBas = el('span', 'score-bas', score);
     this.timer = el('div', 'timer', this.root);
+    score.insertBefore(this.timer, this.scoreMid);
     this.bombStatus = el('div', 'bomb-status', this.root);
     // --- Team alive pips (top-centre, under the timer) ---
     this.pips = el('div', 'pips', this.root);
@@ -111,12 +122,15 @@ export class HUD {
     const moneyRow = el('div', 'money-row', bl);
     el('span', 'row-label cash-label', moneyRow).textContent = '$ CASH';
     this.money = el('span', 'money', moneyRow);
-    // --- Bottom-right: weapon slots + big ammo ---
+    // --- Bottom-right: weapon (v3.16 Phase 3a: name on top, AMMO label,
+    // big ammo, slots, grenades — reference order).
     const br = el('div', 'br', this.root);
+    this.weaponName = el('div', 'wname', br);
+    this.ammoLabel = el('div', 'ammo-label', br);
+    this.ammoLabel.textContent = 'AMMO';
+    this.ammo = el('div', 'ammo', br);
     this.slots = el('div', 'slots', br);
     this._slotsSig = '';
-    this.ammo = el('div', 'ammo', br);
-    this.weaponName = el('div', 'wname', br);
     this.grenades = el('div', 'grenades', br);
     // --- Plant/defuse progress ---
     this.channel = el('div', 'channel', this.root);
@@ -512,31 +526,46 @@ export class HUD {
       old.el.remove();
     }
   }
-  // v3.13 (item 4): end-of-match scoreboard. VICTORY/DEFEAT, team scores,
-  // and a per-team table (K / A / D / HS% / DMG / CASH) built from the
-  // REAL match stats sim.js tracked all match (never invented numbers).
-  // NOTE (bug found while building this): in real play the end overlay
-  // NEVER appeared — sim.endMatch() pushed a 'matchEnd' event that no HUD
-  // code handled, so only the ?shot=end staging ever showed it. update()
-  // now handles that event. "MAIN LAGI" soft-restarts via onPlayAgain
-  // (main.js); R still does a full page reload.
+  // v3.16 Phase 3a (reference-style): end-of-match scoreboard — big table
+  // per team (PLAYER / K / D / PTS / CASH / WEAPON) + team totals + the
+  // win line with the real last-round reason + "Your reward" (the player's
+  // real match earnings). PTS is a REAL derived stat: 2 per kill + 1 per
+  // assist (same honesty as HS% — a function of tracked stats, never
+  // invented). WEAPON is the player's/bot's real current weapon.
   showEnd() {
     const s = this.sim;
     const winner = s.score.solara > s.score.bastion ? 'solara' : 'bastion';
     const youWin = winner === 'solara';
+    const pts = (r) => r.kills * 2 + r.assists;
+    const weaponOf = (name) => {
+      if (name === 'You') return this.player.weapon.def.name;
+      const b = this._bots && this._bots.find((x) => x.name === name);
+      return b ? (WEAPONS[b.weapon] ? WEAPONS[b.weapon].name : b.weapon) : '—';
+    };
     const rows = (team) => [...s.stats.values()]
       .filter((r) => r.team === team)
       .sort((a, b) => b.kills - a.kills || b.damage - a.damage)
-      .map((r) => {
-        const hs = r.kills > 0 ? `${Math.round((r.hsKills / r.kills) * 100)}%` : '—';
-        return `<tr><td class="sb-name">${r.name}</td><td>${r.kills}</td><td>${r.assists}</td><td>${r.deaths}</td><td>${hs}</td><td>${r.damage}</td><td>$${r.earned}</td></tr>`;
-      }).join('');
-    const table = (team, label, cls) => `<div class="sb-team ${cls}"><h3>${label}</h3><table class="sb-table"><tr><th>PLAYER</th><th>K</th><th>A</th><th>D</th><th>HS%</th><th>DMG</th><th>CASH</th></tr>${rows(team) || '<tr><td colspan="7">No stats recorded</td></tr>'}</table></div>`;
+      .map((r) => `<tr><td class="sb-name">${r.name}</td><td>${r.kills}</td><td>${r.deaths}</td><td>${pts(r)}</td><td>$${r.earned}</td><td>${weaponOf(r.name)}</td></tr>`).join('');
+    const totals = (team) => {
+      const rs = [...s.stats.values()].filter((r) => r.team === team);
+      const sum = (k) => rs.reduce((a, r) => a + r[k], 0);
+      return `<tr class="sb-total"><td class="sb-name">Team</td><td>${sum('kills')}</td><td>${sum('deaths')}</td><td>${rs.reduce((a, r) => a + pts(r), 0)}</td><td>$${sum('earned')}</td><td></td></tr>`;
+    };
+    const table = (team, label, cls) => `<div class="sb-team ${cls}"><h3>${label} <span class="sb-score">${s.score[team]}</span></h3><table class="sb-table"><tr><th>PLAYER</th><th>K</th><th>D</th><th>PTS</th><th>CASH</th><th>WEAPON</th></tr>${rows(team) || '<tr><td colspan="6">No stats recorded</td></tr>'}${totals(team)}</table></div>`;
+    const me = s.stats.get(this.player);
+    const reward = me ? me.earned : 0;
+    const reason = s.lastRoundReason ? `: ${s.lastRoundReason}` : '';
     this.endOverlay.classList.remove('hidden');
-    this.endOverlay.innerHTML = `<h1 class="${youWin ? 'sb-win' : 'sb-lose'}">${youWin ? '★ VICTORY ★' : 'DEFEAT'}</h1>
-      <p class="sub">Final score — SOLARA ${s.score.solara} · ${s.score.bastion} BASTION</p>
+    // v3.16 Phase 3a: the match banner ("SOLARA TAKES THE MATCH", 8 s) would
+    // show through the semi-transparent overlay and collide with the win
+    // line — hide it; the scoreboard IS the match announcement now.
+    this.sim.bannerT = 0;
+    this.endOverlay.innerHTML = `<p class="sb-kicker">ROUND OVER · ROUND ${s.round} OF ${MAX_ROUNDS}</p>
+      <h1 class="${youWin ? 'sb-win' : 'sb-lose'}">${youWin ? '★ SOLARA WIN ★' : '★ BASTION WIN ★'}</h1>
+      <p class="sub">${youWin ? 'Solara' : 'Bastion'} win${reason} · Final score — SOLARA ${s.score.solara} · ${s.score.bastion} BASTION</p>
+      <p class="sb-reward">Your reward $${reward}</p>
       <div class="sb-tables">${table('solara', 'SOLARA', 'sb-sol')}${table('bastion', 'BASTION', 'sb-bas')}</div>
-      <p class="roster">Cash = earned this match (kill $300 · plant $300 · round bonus)</p>
+      <p class="roster">PTS = 2 per kill + 1 per assist · Cash = earned this match (kill $300 · plant $300 · round bonus)</p>
       <button class="sb-again" id="sb-again">▶ MAIN LAGI</button>
       <p class="cta">Press R to play again</p>`;
     this.endOpen = true; // v3.13: keeps the pause overlay off the scoreboard
@@ -553,10 +582,11 @@ export class HUD {
     const sz = (z) => C + ((z - (b.minZ + b.maxZ) / 2) / (b.maxZ - b.minZ)) * (S - 14);
     g.clearRect(0, 0, S, S);
     g.save();
-    g.beginPath(); g.arc(C, C, C - 2, 0, Math.PI * 2); g.clip();
-    g.fillStyle = '#dfe6ec'; g.fillRect(0, 0, S, S);
+    // v3.16 Phase 3a: square dark minimap (reference-style), not a circle.
+    g.beginPath(); g.roundRect(2, 2, S - 4, S - 4, 10); g.clip();
+    g.fillStyle = '#23262b'; g.fillRect(0, 0, S, S);
     // Colliders = cover / walls.
-    g.fillStyle = '#5a6673';
+    g.fillStyle = '#6b7684';
     for (const c of this.map.colliders) {
       g.fillRect(sx(c.minX), sz(c.minZ), sx(c.maxX) - sx(c.minX), sz(c.maxZ) - sz(c.minZ));
     }
@@ -571,7 +601,7 @@ export class HUD {
       g.fillText(key, sx(c.x), sz(c.z) + 0.5);
     }
     // Zone labels: spatial context on the minimap (Gemini v3.3 review).
-    g.fillStyle = 'rgba(13,17,23,0.8)';
+    g.fillStyle = 'rgba(255,255,255,0.55)';
     g.font = 'bold 8px system-ui';
     g.textAlign = 'center'; g.textBaseline = 'middle';
     g.fillText('FOUNDRY', sx(15), sz(-12) + 17);
@@ -609,9 +639,9 @@ export class HUD {
     g.beginPath(); g.moveTo(0, -7); g.lineTo(5, 5); g.lineTo(0, 2.5); g.lineTo(-5, 5); g.closePath(); g.fill();
     g.restore();
     g.restore();
-    // Round rim.
+    // Square rim.
     g.strokeStyle = '#4a5568'; g.lineWidth = 3;
-    g.beginPath(); g.arc(C, C, C - 2, 0, Math.PI * 2); g.stroke();
+    g.beginPath(); g.roundRect(2, 2, S - 4, S - 4, 10); g.stroke();
   }
 
   // Squad row: You + the four Solara bots (real names, roles, weapons).
@@ -675,10 +705,22 @@ export class HUD {
       c.t -= dt;
       if (c.t <= 0) { c.el.remove(); this.chatItems.splice(i, 1); }
     }
+    // v3.16 Phase 3a: map location label (real player position → zone).
+    const zx = p.pos.x, zz = p.pos.z;
+    const zone = Math.hypot(zx - 15, zz + 12) < 8 ? 'FOUNDRY'
+      : Math.hypot(zx - 15, zz - 12) < 8 ? 'CRANE YARD'
+      : zx < -10 ? 'WEST YARD' : zx > 10 ? 'EAST YARD' : 'MID';
+    const ml = `IRONWORKS RIDGE · ${zone}`;
+    if (this._mapLabel !== ml) { this._mapLabel = ml; this.mapLabel.textContent = ml; }
     // Score / timer / round pips.
     this.scoreSol.textContent = `SOLARA ${s.score.solara}`;
     this.scoreBas.textContent = `${s.score.bastion} BASTION`;
     this.scoreMid.textContent = `ROUND ${s.round}/${MAX_ROUNDS}`;
+    // v3.16 Phase 3a: status in the top bar (LIVE / PLANTED / FREEZE / ...).
+    const st = s.phase === 'freeze' ? 'FREEZE'
+      : s.phase === 'end' ? 'ROUND OVER' : s.phase === 'matchEnd' ? 'MATCH OVER'
+      : s.bombPlanted ? `PLANTED — SITE ${s.bombSite}` : 'LIVE';
+    if (this._scoreStatus !== st) { this._scoreStatus = st; this.scoreStatus.textContent = st; }
     const aliveSol = (p.alive ? 1 : 0) + bots.filter((b) => b.alive && b.team === 'solara').length;
     const aliveBas = bots.filter((b) => b.alive && b.team === 'bastion').length;
     [...this.pipsSol.children].forEach((dot, i) => dot.classList.toggle('dead', i >= aliveSol));
@@ -825,9 +867,13 @@ export class HUD {
         c.textContent = '💣 BOMB';
       }
     }
-    // Plant/defuse channel.
-    const prog = s.plantProgress > 0 ? { v: s.plantProgress / 3, label: 'PLANTING…' }
-      : s.defuseProgress > 0 ? { v: s.defuseProgress / s.defuseTime, label: p.hasKit ? 'DEFUSING… (KIT)' : 'DEFUSING…' } : null;
+    // Plant/defuse channel (v3.16 Phase 3a: label carries the real
+    // remaining seconds, reference-style "DEFUSING WITH KIT 2.7s").
+    const prog = s.plantProgress > 0
+      ? { v: s.plantProgress / 3, label: `PLANTING… ${Math.max(0, 3 - s.plantProgress).toFixed(1)}s` }
+      : s.defuseProgress > 0
+        ? { v: s.defuseProgress / s.defuseTime, label: `${p.hasKit ? 'DEFUSING WITH KIT' : 'DEFUSING…'} ${Math.max(0, s.defuseTime - s.defuseProgress).toFixed(1)}s` }
+        : null;
     if (prog) {
       this.channel.classList.remove('hidden');
       this.channelFill.style.width = `${Math.min(100, prog.v * 100)}%`;
@@ -859,7 +905,7 @@ export class HUD {
   // invented positions. Bearing math: yawToFace(target) =
   // atan2(-(tx-px), -(tz-pz)); heading = -yaw in degrees.
   drawCompass(bots) {
-    const g = this.cx, W = 340, H = 34, cx = W / 2;
+    const g = this.cx, W = 280, H = 34, cx = W / 2;
     if (!g) return;
     const p = this.player;
     const wrap180 = (a) => { while (a > 180) a -= 360; while (a < -180) a += 360; return a; };

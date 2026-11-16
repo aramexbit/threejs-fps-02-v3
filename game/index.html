@@ -37,63 +37,67 @@
   .bl, .br, .score, .timer, .feed-item, .chat-item, .banner, .statusmsg, .plantprompt, .buy, .help, .settings { transition: opacity .2s ease, transform .2s ease; }
   /* Compass — top-centre, di atas score pill. Canvas 2D yang digambar
      hud.js tiap frame dari yaw pemain + posisi site/musuh (bukan statis). */
-  .compass { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); }
-  .compass canvas { display: block; width: 340px; height: 34px; }
-  /* Minimap — v3.15 PINDAH ke kanan atas (tactical). */
-  .minimap-wrap { position: absolute; top: 14px; right: 14px; }
-  .minimap { width: 150px; height: 150px; border-radius: 50%; box-shadow: 0 0 0 3px rgba(255,122,47,.55), 0 2px 8px rgba(0,0,0,.30); background: #dfe6ec; }
-  /* HP / ARMOR / CASH panel — v3.15 PINDAH ke kiri bawah (tactical).
-     Angka HP besar + bar; aksen oranye; pulse merah saat HP rendah. */
-  .bl { position: absolute; left: 16px; bottom: 16px; width: 240px; background: var(--navy); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 10px; padding: 8px 12px; box-shadow: 0 2px 8px rgba(0,0,0,.25); text-shadow: 0 1px 3px rgba(0,0,0,.55); }
+  .compass { position: absolute; top: 48px; left: 50%; transform: translateX(-50%); }
+  .compass canvas { display: block; width: 280px; height: 34px; }
+  /* Minimap — v3.16 Phase 3a: PINDAH ke kiri atas, kotak gelap (reference-style). */
+  .minimap-wrap { position: absolute; top: 14px; left: 14px; }
+  .minimap { width: 150px; height: 150px; border-radius: 10px; box-shadow: 0 0 0 3px rgba(255,122,47,.55), 0 2px 8px rgba(0,0,0,.30); background: #23262b; }
+  /* v3.16 Phase 3a: label lokasi map di bawah minimap (reference-style). */
+  .maplabel { position: absolute; top: 170px; left: 14px; font-size: 11px; font-weight: 800; letter-spacing: .12em; color: #eef2f6; background: var(--navy); padding: 5px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,.18); box-shadow: 0 2px 8px rgba(0,0,0,.25); max-width: 240px; pointer-events: none; }
+  /* HP / ARMOR / CASH panel — v3.16 Phase 3a: 3 kolom angka besar (reference),
+     bar HP di bawah membentang penuh. */
+  .bl { position: absolute; left: 16px; bottom: 16px; width: 300px; background: var(--navy); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 10px; padding: 8px 12px; box-shadow: 0 2px 8px rgba(0,0,0,.25); text-shadow: 0 1px 3px rgba(0,0,0,.55); display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 2px 12px; }
   .bl.lowhp { animation: lowhp 1s infinite; }
   @keyframes lowhp { 0%, 100% { border-left-color: rgba(224,53,43,.5); } 50% { border-left-color: #e0352b; box-shadow: 0 0 18px rgba(224,53,43,.55); } }
-  .hp-row, .armor-row, .money-row { display: flex; justify-content: space-between; align-items: baseline; font-size: 14px; font-weight: 800; }
+  .hp-row { grid-column: 1; grid-row: 1; display: flex; flex-direction: column; align-items: flex-start; font-size: 11px; font-weight: 800; letter-spacing: .1em; }
+  .armor-row { grid-column: 2; grid-row: 1; display: flex; flex-direction: column; align-items: flex-start; font-size: 11px; font-weight: 800; letter-spacing: .1em; }
+  .money-row { grid-column: 3; grid-row: 1; display: flex; flex-direction: column; align-items: flex-start; font-size: 11px; font-weight: 800; letter-spacing: .1em; }
   .row-label { letter-spacing: .04em; }
   .hp-label { color: #ff6b61; }
   .armor-label { color: #7fb3ff; }
   .cash-label { color: var(--gold); }
-  .hpbar { width: 100%; height: 10px; background: rgba(255,255,255,.12); border: 1px solid var(--line); border-radius: 999px; overflow: hidden; margin: 5px 0 7px; }
+  .hpbar { grid-column: 1 / -1; grid-row: 2; width: 100%; height: 10px; background: rgba(255,255,255,.12); border: 1px solid var(--line); border-radius: 999px; overflow: hidden; margin: 5px 0 0; }
   .hpfill { height: 100%; width: 100%; background: #f4f6f8; transition: width .18s ease, background .18s ease; }
-  .hptext, .armor-val { color: var(--ink); }
-  .money { color: var(--gold); }
-  /* Score bar — top-centre, di bawah compass. */
-  .score { position: absolute; top: 48px; left: 50%; transform: translateX(-50%); display: flex; gap: 12px; align-items: center; font-weight: 800; letter-spacing: .06em; background: var(--navy); border: 1px solid var(--line); border-radius: 10px; padding: 6px 14px; box-shadow: 0 2px 8px rgba(0,0,0,.25); text-shadow: 0 1px 3px rgba(0,0,0,.55); white-space: nowrap; }
+  .hptext, .armor-val { color: var(--ink); font-size: 30px; font-weight: 900; line-height: 1.05; }
+  .money { color: var(--gold); font-size: 30px; font-weight: 900; line-height: 1.05; }
+  /* Score bar — v3.16 Phase 3a: SATU bar di atas tengah (SOLARA · LIVE ·
+     timer · ROUND · BASTION, reference-style). Timer tinggal DI DALAM bar. */
+  .score { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); display: flex; gap: 12px; align-items: center; font-weight: 800; letter-spacing: .06em; background: var(--navy); border: 1px solid var(--line); border-radius: 10px; padding: 6px 14px; box-shadow: 0 2px 8px rgba(0,0,0,.25); text-shadow: 0 1px 3px rgba(0,0,0,.55); white-space: nowrap; }
   .score-sol { color: var(--red-bright); font-size: 15px; }
   .score-bas { color: var(--blue-bright); font-size: 15px; }
   .score-mid { color: var(--ink); font-size: 12px; opacity: .85; letter-spacing: .1em; }
-  .timer { position: absolute; top: 94px; left: 50%; transform: translateX(-50%); font-size: 28px; font-weight: 900; background: var(--navy); border: 1px solid var(--line); border-radius: 10px; padding: 2px 16px; box-shadow: 0 2px 8px rgba(0,0,0,.25); text-shadow: 0 1px 3px rgba(0,0,0,.55); }
+  .score-status { color: #ffd166; font-size: 12px; letter-spacing: .14em; }
+  .timer { position: static; transform: none; font-size: 20px; font-weight: 900; background: none; border: none; border-radius: 0; padding: 0; box-shadow: none; text-shadow: 0 1px 3px rgba(0,0,0,.55); }
   .timer.urgent { color: #ff5a4e; border-color: rgba(255,90,78,.7); }
-  /* Mission objective — v3.15 PINDAH ke kiri atas: kartu objektif dengan
-     label MISSION, bukan lagi pill emas di bawah timer. */
-  .bomb-status { position: absolute; top: 14px; left: 14px; max-width: 320px; font-size: 13px; font-weight: 800; letter-spacing: .05em; line-height: 1.45; color: var(--ink); background: var(--navy); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 10px; padding: 7px 11px; white-space: normal; text-shadow: 0 1px 3px rgba(0,0,0,.55); }
+  /* Mission objective — v3.16 Phase 3a: pill di tengah bawah klaster atas. */
+  .bomb-status { position: absolute; top: 150px; left: 50%; transform: translateX(-50%); max-width: 440px; font-size: 13px; font-weight: 800; letter-spacing: .05em; line-height: 1.45; color: var(--ink); background: var(--navy); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 10px; padding: 7px 11px; white-space: normal; text-align: center; text-shadow: 0 1px 3px rgba(0,0,0,.55); }
   .bomb-status::before { content: '◉ MISSION — '; color: var(--accent); }
   .bomb-status:empty { display: none; }
-  /* Team alive pips — di bawah timer. */
-  .pips { position: absolute; top: 142px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 4px; align-items: center; }
+  /* Team alive pips — di bawah compass. */
+  .pips { position: absolute; top: 90px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 4px; align-items: center; }
   .pips-sol i, .pips-bas i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin: 0 2px; box-shadow: 0 1px 4px rgba(0,0,0,.7); }
   .pips-sol i { background: var(--red-bright); } .pips-bas i { background: var(--blue-bright); }
   .pips-sol i.dead, .pips-bas i.dead { background: #3a4450; opacity: .55; }
-  /* Kill feed — kanan atas, di bawah tombol gear/help (yang pindah ke
-     bawah minimap). */
-  .feed { position: absolute; top: 228px; right: 16px; text-align: right; font-size: 13px; font-weight: 600; }
+  /* Kill feed — v3.16 Phase 3a: kanan atas. */
+  .feed { position: absolute; top: 14px; right: 16px; text-align: right; font-size: 13px; font-weight: 600; }
   .feed-item { background: var(--navy); border: 1px solid var(--line); border-right: 3px solid var(--red-bright); padding: 5px 10px; margin-bottom: 5px; border-radius: 8px; animation: feedIn .18s ease; }
   @keyframes feedIn { from { opacity: 0; transform: translateX(12px); } }
   .feed-item.feed-hs { border-right-color: #ff2f2f; background: rgba(60,16,12,.70); }
   .feed-weapon { color: var(--gold); }
   .feed-hs-tag { color: #ff5a4e; font-weight: 800; }
-  /* Team chat / radio — kiri bawah, di atas panel HP. */
-  .chat { position: absolute; left: 16px; bottom: 148px; font-size: 13px; font-weight: 600; max-width: 430px; }
+  /* Team chat / radio — v3.16 Phase 3a: kiri, di bawah minimap. */
+  .chat { position: absolute; left: 16px; top: 206px; font-size: 13px; font-weight: 600; max-width: 430px; }
   .chat-item { background: var(--navy); border: 1px solid var(--line); border-left: 3px solid var(--red-bright); padding: 5px 10px; margin-bottom: 4px; border-radius: 8px; animation: feedIn .18s ease; }
   .chat-item.chat-bas { border-left-color: var(--blue-bright); }
   /* Flashbang overlay */
   .flashfx { position: absolute; inset: 0; background: #fff; opacity: 0; transition: opacity 1.2s; pointer-events: none; }
   /* Banner */
   .banner { position: absolute; top: 30%; left: 50%; transform: translate(-50%, -50%); font-size: 30px; font-weight: 900; letter-spacing: .08em; text-align: center; text-shadow: 0 3px 14px rgba(0,0,0,.9); color: var(--gold); white-space: nowrap; }
-  /* v3.8 kill banners: HEADSHOT merah + multi-kill oranye, di kanan
-     bawah kill feed (feed kini di 228px, jadi banner turun ke ~400px). */
-  .killbanner { position: absolute; top: 400px; right: 16px; font-size: 26px; font-weight: 900; font-style: italic; letter-spacing: .02em; color: #fff; background: linear-gradient(100deg, rgba(190,20,20,.78), rgba(120,8,8,.70)); border: 1px solid rgba(255,90,78,.9); border-radius: 8px; padding: 8px 14px; transform: skewX(-6deg); text-shadow: 0 2px 8px rgba(0,0,0,.8); box-shadow: 0 2px 10px rgba(0,0,0,.35); white-space: nowrap; }
+  /* v3.8 kill banners: HEADSHOT merah + multi-kill oranye, di kanan bawah
+     kill feed (feed kini di atas, jadi banner di ~250px). */
+  .killbanner { position: absolute; top: 250px; right: 16px; font-size: 26px; font-weight: 900; font-style: italic; letter-spacing: .02em; color: #fff; background: linear-gradient(100deg, rgba(190,20,20,.78), rgba(120,8,8,.70)); border: 1px solid rgba(255,90,78,.9); border-radius: 8px; padding: 8px 14px; transform: skewX(-6deg); text-shadow: 0 2px 8px rgba(0,0,0,.8); box-shadow: 0 2px 10px rgba(0,0,0,.35); white-space: nowrap; }
   .killbanner b { color: var(--gold); }
-  .multibanner { position: absolute; top: 460px; right: 16px; font-size: 24px; font-weight: 900; font-style: italic; letter-spacing: .04em; color: #fff; background: linear-gradient(100deg, rgba(176,90,10,.78), rgba(110,50,5,.70)); border: 1px solid rgba(255,122,47,.9); border-radius: 8px; padding: 8px 18px; transform: skewX(-6deg); text-shadow: 0 2px 8px rgba(0,0,0,.8); box-shadow: 0 2px 10px rgba(0,0,0,.35); white-space: nowrap; }
+  .multibanner { position: absolute; top: 310px; right: 16px; font-size: 24px; font-weight: 900; font-style: italic; letter-spacing: .04em; color: #fff; background: linear-gradient(100deg, rgba(176,90,10,.78), rgba(110,50,5,.70)); border: 1px solid rgba(255,122,47,.9); border-radius: 8px; padding: 8px 18px; transform: skewX(-6deg); text-shadow: 0 2px 8px rgba(0,0,0,.8); box-shadow: 0 2px 10px rgba(0,0,0,.35); white-space: nowrap; }
   /* Crosshair — titik oranye di tengah + 4 garis putih. */
   .cross { position: absolute; left: 50%; top: 50%; width: 0; height: 0; --sp: 8px; }
   .cross::after { content: ''; position: absolute; left: -2px; top: -2px; width: 4px; height: 4px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 3px #000; }
@@ -128,6 +132,7 @@
   .slot-empty { opacity: .45; }
   .slot-bomb { color: var(--gold); border-color: var(--gold); }
   .ammo { font-size: 46px; font-weight: 900; line-height: 1; text-shadow: 0 3px 10px rgba(0,0,0,.85); }
+  .ammo-label { font-size: 11px; font-weight: 800; letter-spacing: .16em; color: var(--muted); }
   .ammo.bump { animation: ampop .15s ease; }
   @keyframes ampop { 50% { transform: scale(1.12); } }
   .ammo span { font-size: 22px; color: var(--muted); }
@@ -162,13 +167,13 @@
   .buy-hint { font-size: 12px; color: var(--muted); }
   /* Overlays */
   .overlay { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(6,10,18,.70), rgba(6,10,18,.82)); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; pointer-events: auto; }
-  /* v3.10: gear button + help button — v3.15 di bawah minimap (kanan atas),
-     karena minimap pindah ke kanan atas. */
-  .gearbtn { position: absolute; top: 178px; right: 16px; pointer-events: auto; background: var(--navy); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px 13px; font-size: 13px; font-weight: 800; cursor: pointer; letter-spacing: .04em; }
+  /* v3.10: gear button + help button — v3.16 Phase 3a: di bawah kill feed
+     (kanan atas), karena minimap pindah ke kiri atas. */
+  .gearbtn { position: absolute; top: 196px; right: 16px; pointer-events: auto; background: var(--navy); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px 13px; font-size: 13px; font-weight: 800; cursor: pointer; letter-spacing: .04em; }
   .gearbtn:hover { border-color: var(--gold); color: var(--gold); }
   /* v3.13: help button (next to gear), help panel, plant/defuse prompt,
      scoreboard, difficulty tag. */
-  .helpbtn { position: absolute; top: 178px; right: 138px; pointer-events: auto; background: var(--navy); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px 13px; font-size: 13px; font-weight: 800; cursor: pointer; letter-spacing: .04em; }
+  .helpbtn { position: absolute; top: 196px; right: 138px; pointer-events: auto; background: var(--navy); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px 13px; font-size: 13px; font-weight: 800; cursor: pointer; letter-spacing: .04em; }
   .helpbtn:hover { border-color: var(--gold); color: var(--gold); }
   .help { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 640px; max-width: 92vw; max-height: 86vh; overflow: auto; background: var(--navy-2); border: 1px solid var(--line); border-radius: 12px; padding: 22px 24px; pointer-events: auto; box-shadow: 0 8px 24px rgba(0,0,0,.40); z-index: 30; }
   .help-title { font-size: 20px; font-weight: 900; letter-spacing: .06em; color: var(--gold); margin-bottom: 12px; }
@@ -181,21 +186,25 @@
   .plantprompt { position: absolute; left: 50%; bottom: 30%; transform: translateX(-50%); font-size: 15px; font-weight: 800; letter-spacing: .05em; color: var(--gold); background: var(--navy); border: 1px solid rgba(255,210,74,.4); border-radius: 999px; padding: 7px 18px; white-space: nowrap; }
   .plantprompt-big { font-size: 24px; padding: 10px 24px; animation: pulse 1.2s infinite; border-color: var(--gold); box-shadow: 0 0 24px rgba(255,210,74,.35); }
   /* Difficulty tag under the top cluster. */
-  .difftag { position: absolute; top: 172px; left: 50%; transform: translateX(-50%); font-size: 11px; font-weight: 800; letter-spacing: .14em; color: var(--muted); background: rgba(255,255,255,.06); border: 1px solid var(--line); border-radius: 999px; padding: 3px 12px; white-space: nowrap; }
+  .difftag { position: absolute; top: 122px; left: 50%; transform: translateX(-50%); font-size: 11px; font-weight: 800; letter-spacing: .14em; color: var(--muted); background: rgba(255,255,255,.06); border: 1px solid var(--line); border-radius: 999px; padding: 3px 12px; white-space: nowrap; }
   .diff-line { font-size: 14px; color: var(--muted); margin: 8px 0 0; }
   .diff-line b { color: var(--gold); }
-  /* Scoreboard (end of match). */
+  /* Scoreboard (end of match) — v3.16 Phase 3a: big reference-style table. */
   .sb-win { color: var(--gold) !important; }
   .sb-lose { color: #ff5a4e !important; }
+  .sb-kicker { font-size: 12px; font-weight: 800; letter-spacing: .18em; color: var(--muted); margin: 0 0 6px; }
+  .sb-reward { font-size: 18px; font-weight: 900; color: var(--gold); margin: 8px 0 0; letter-spacing: .04em; }
   .sb-tables { display: flex; gap: 16px; margin: 14px 0 6px; max-width: 94vw; }
   .sb-team { background: var(--navy-2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; min-width: 300px; }
   .sb-team h3 { margin: 0 0 8px; font-size: 15px; letter-spacing: .12em; }
+  .sb-score { float: right; color: var(--gold); font-size: 18px; }
   .sb-sol h3 { color: var(--red-bright); } .sb-bas h3 { color: var(--blue-bright); }
   .sb-table { border-collapse: collapse; width: 100%; font-size: 14px; }
   .sb-table th { color: var(--muted); font-size: 11px; letter-spacing: .1em; text-align: right; padding: 3px 8px; }
   .sb-table th:first-child, .sb-table td:first-child { text-align: left; }
   .sb-table td { text-align: right; padding: 4px 8px; font-weight: 700; }
   .sb-table td.sb-name { color: var(--ink); }
+  .sb-table tr.sb-total td { border-top: 2px solid rgba(255,255,255,.25); color: var(--gold); }
   .sb-again { display: block; margin: 14px auto 0; padding: 12px 34px; background: var(--gold); color: #0d1117; border: none; border-radius: 8px; font-size: 16px; font-weight: 900; letter-spacing: .06em; cursor: pointer; }
   .sb-again:hover { filter: brightness(1.1); }
   .statusmsg { position: absolute; left: 50%; top: 63%; transform: translateX(-50%); font-size: 15px; font-weight: 800; letter-spacing: .05em; color: var(--gold); background: var(--navy); border: 1px solid rgba(255,210,74,.4); border-radius: 999px; padding: 6px 16px; white-space: nowrap; }
@@ -232,19 +241,21 @@
   /* v3.15 — responsif PC: layar sempit mengecilkan HUD, tidak terpotong. */
   @media (max-width: 900px) {
     .minimap { width: 110px; height: 110px; }
-    .gearbtn { top: 138px; } .helpbtn { top: 138px; }
-    .feed { top: 188px; font-size: 11px; }
-    .killbanner { top: 340px; font-size: 19px; } .multibanner { top: 388px; font-size: 18px; }
+    .maplabel { top: 130px; font-size: 10px; max-width: 150px; }
+    .gearbtn { top: 150px; } .helpbtn { top: 150px; }
+    .feed { top: 14px; font-size: 11px; }
+    .killbanner { top: 210px; font-size: 19px; } .multibanner { top: 258px; font-size: 18px; }
     .bl { width: 190px; }
+    .hptext, .armor-val, .money { font-size: 22px; }
     .br .ammo { font-size: 34px; }
     .banner { font-size: 22px; }
     .buy-grid { grid-template-columns: 1fr 1fr; }
     .compass canvas { width: 260px; height: 26px; }
-    .chat { max-width: 55vw; }
+    .chat { max-width: 55vw; top: 170px; }
   }
   @media (max-width: 640px) {
     .score { font-size: 12px; padding: 5px 10px; gap: 8px; }
-    .timer { font-size: 22px; }
+    .timer { font-size: 18px; }
     .bomb-status { max-width: 52vw; font-size: 11px; }
     .chat { display: none; }
     .bl { width: 170px; padding: 8px 10px; }

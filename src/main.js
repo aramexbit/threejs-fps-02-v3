@@ -360,7 +360,7 @@ function setupShot() {
     player.yaw = -Math.PI / 2 - 0.12;
     player.pitch = 0.01;
   }
-  player.applyCamera(0);
+  player.applyCamera(0, STEP);
 }
 
 // --- Main loop -------------------------------------------------------------------------
@@ -438,7 +438,7 @@ function frame(now) {
     steps++;
   }
   // Camera + effects (render-time).
-  player.applyCamera(sim.time);
+  player.applyCamera(sim.time, dt);
   const t = sim.time;
   fx.particles.update(dt);
   fx.flash.update(dt);

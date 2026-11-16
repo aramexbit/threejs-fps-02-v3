@@ -40,7 +40,7 @@ export class Sim {
     this.radioT = -99; // last radio line (global throttle)
     this.radioPerBot = new Map(); // bot name -> last line time
     this.defuseTime = 5; // 2.5 s with a defuse kit
-    this.debugPlantHold = false; // shot mode: pretend E is held for the plant shot
+    this.debugPlantHold = false; // shot mode: pretend F is held for the plant shot
     // v3.13: attack/defence ALTERNATES by round. Odd rounds Solara attacks
     // (the player carries the bomb and plants — item 1); even rounds
     // Bastion attacks (a Bastion bot carries and plants, the player +
@@ -304,11 +304,11 @@ export class Sim {
         if (Math.floor(this.plantProgress * 4) !== Math.floor((this.plantProgress - dt) * 4)) this.audio.beep();
         if (this.plantProgress >= 3) this._plant(site, 'solara', true);
       } else {
-        // v3.13 (item 1): a TAP on E inside a site used to do nothing at
+        // v3.13 (item 1): a TAP on F inside a site used to do nothing at
         // all — no sound, no text, progress 0 — so it read as "tombol bom
         // tidak berfungsi". A tap now says what to do instead.
-        if (site && !held && this.plantProgress === 0 && input.consume('KeyE')) {
-          this.events.push({ type: 'status', text: 'TAHAN [E] 3 DETIK UNTUK PASANG BOM', dur: 2 });
+        if (site && !held && this.plantProgress === 0 && input.consume('KeyF')) {
+          this.events.push({ type: 'status', text: 'TAHAN [F] 3 DETIK UNTUK PASANG BOM', dur: 2 });
         }
         this.plantProgress = 0;
       }
@@ -749,10 +749,16 @@ export class Sim {
       }
       if (input.consume('KeyG')) p.throwGrenade(this.time);
       if (input.consume('Digit4')) p.cycleGrenade();
-      if (input.consume('KeyQ')) p.equip((p.slot + 1) % p.slots.length);
       if (input.consume('Digit1')) p.equip(0);
       if (input.consume('Digit2') && p.slots.length > 1) p.equip(1);
       if (input.consume('Digit3') && p.slots.length > 2) p.equip(2);
+    }
+    // v3.16 Phase 1: mouse-wheel weapon switch works in freeze AND round
+    // (players buy + switch during freeze). The old Q switch lived inside
+    // the round-only block above, so it was dead during freeze.
+    if ((this.phase === 'freeze' || this.phase === 'round') && p.alive) {
+      const wheel = input.consumeWheel();
+      if (wheel !== 0) p.equip((p.slot + (wheel > 0 ? 1 : -1) + p.slots.length) % p.slots.length);
     }
     // Recoil decay.
     p.recoil = Math.max(0, p.recoil - dt * 0.05);

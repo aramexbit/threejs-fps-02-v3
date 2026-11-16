@@ -54,10 +54,10 @@ scene.add(camera);
 // version (the hand positions were tuned against FOV 74).
 const vmScene = new THREE.Scene();
 const vmCamera = new THREE.PerspectiveCamera(74, innerWidth / innerHeight, 0.01, 5);
-const vmKey = new THREE.DirectionalLight(0xfff2e0, 3.0);
+const vmKey = new THREE.DirectionalLight(0xfff2e0, 3.5);
 vmKey.position.set(0.6, 1.0, 0.9);
 vmScene.add(vmKey);
-vmScene.add(new THREE.AmbientLight(0xbfd0e0, 1.2));
+vmScene.add(new THREE.AmbientLight(0xbfd0e0, 1.5));
 vmScene.add(vmCamera); // the camera must be IN the scene: its children
 // (the viewmodel) only get matrix updates via scene.updateMatrixWorld().
 
@@ -66,7 +66,11 @@ const sky = createSky();
 scene.add(sky);
 scene.add(createClouds());
 const lights = createLights(scene);
-applyEnvironment(renderer, scene, sky);
+const envRT = applyEnvironment(renderer, scene, sky);
+// v3.16 Phase 5a: the viewmodel scene gets the SAME environment — before,
+// high-metal viewmodel faces had no IBL and went near-black (image-66).
+vmScene.environment = envRT.texture;
+vmScene.environmentIntensity = 0.8;
 const map = buildMap(scene);
 // v3.16 Phase 4d: AmbientCG photo textures (CC0, vendored) upgrade the
 // flat-surface materials (concrete walls, flat steel, pallet wood) once

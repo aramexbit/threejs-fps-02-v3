@@ -938,9 +938,13 @@ export class HUD {
     let rel = yawTo - p.yaw;
     while (rel > Math.PI) rel -= Math.PI * 2;
     while (rel < -Math.PI) rel += Math.PI * 2;
+    // Bearing convention: yaw grows counter-clockwise (forward =
+    // (-sin yaw, -cos yaw)), so a target with yawTo > yaw sits to the
+    // player's LEFT — rel > 0 lights the left ('w') arc, rel < 0 the
+    // right ('e') arc. (The first version had e/w swapped.)
     const dir = Math.abs(rel) <= Math.PI / 4 ? 'n'
-      : rel > Math.PI / 4 && rel <= (3 * Math.PI) / 4 ? 'e'
-      : rel < -Math.PI / 4 && rel >= (-3 * Math.PI) / 4 ? 'w' : 's';
+      : rel > Math.PI / 4 && rel <= (3 * Math.PI) / 4 ? 'w'
+      : rel < -Math.PI / 4 && rel >= (-3 * Math.PI) / 4 ? 'e' : 's';
     for (const [k, a] of Object.entries(this._dmgArcs)) a.style.opacity = k === dir ? '1' : '0';
     this._dmgDirT = 0.9;
   }

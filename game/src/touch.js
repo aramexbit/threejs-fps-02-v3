@@ -61,7 +61,7 @@ export class TouchControls {
       e.preventDefault();
       if (this.stickId !== null) return;
       this.stickId = e.pointerId;
-      this.stickZone.setPointerCapture(e.pointerId);
+      try { this.stickZone.setPointerCapture(e.pointerId); } catch { /* synthetic pointer: capture unavailable, tracking by id still works */ }
       stickMove(e);
     });
     this.stickZone.addEventListener('pointermove', (e) => {
@@ -79,7 +79,7 @@ export class TouchControls {
       if (e.pointerType !== 'touch' || this.lookId !== null) return;
       this.lookId = e.pointerId;
       this.lookLast = { x: e.clientX, y: e.clientY };
-      canvas.setPointerCapture(e.pointerId);
+      try { canvas.setPointerCapture(e.pointerId); } catch { /* see above */ }
     });
     canvas.addEventListener('pointermove', (e) => {
       if (e.pointerId !== this.lookId || !this.lookLast) return;
@@ -98,7 +98,7 @@ export class TouchControls {
       b.addEventListener('pointerdown', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        b.setPointerCapture(e.pointerId);
+        try { b.setPointerCapture(e.pointerId); } catch { /* see above */ }
         b.classList.add('on');
         down();
       });

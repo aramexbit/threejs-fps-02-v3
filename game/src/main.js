@@ -183,7 +183,7 @@ hud.onSettingsChange = (key) => {
   // sensitivity / fov / invertY are read live from the settings singleton.
 };
 // Debug/verification handle (read-only inspection for playtests).
-window.__game = { sim, player, bots, camera, settings, hud, touch, input, map };
+window.__game = { sim, player, bots, camera, settings, hud, touch, input, map, renderer, scene };
 
 // --- Post pass (vignette + grade), written from scratch ----------------------------
 // Renders the scene into a target, then a fullscreen triangle samples it.

@@ -311,6 +311,16 @@ export class Bot {
     this.lastSeen = null; // {x, z, t}
     this.huntTarget = null; // {x, z, kind} — 'lastseen' | 'spawn' | 'sweep'
     this.huntTimer = 0;
+    // v3.16 Phase 3 (AI): flanking, search, patrol state.
+    this._now = 0; // ctx.time, refreshed each update (takeDamage has no ctx)
+    this._searchSteps = 0; // nearby points searched after losing contact
+    this._huntKind = ''; // 'lastseen' | 'heard' | 'spawn' | 'sweep' | 'search'
+    this._flanking = false; // walking to a flank waypoint (see movement)
+    this._flankT = 0; // seconds left on the current flank
+    this._takingFire = false; // hit since the last update -> radio callout
+    this._calmTimer = 0; // v3.16 Phase 3: seconds calm (no enemy/alert/bomb) — patrol trigger; NOT reset by hunt picks
+    this._patrolRoute = null; // [{x,z} x3] — calm patrol loop
+    this._patrolIdx = 0;
     this.idleTimer = 0; // seconds standing at a reached goal with no enemy
     this.path = []; // v3.10: BFS path (waypoint indices) toward this.goal
     this._pathGoal = null;
@@ -375,6 +385,8 @@ export class Bot {
     this.ammo = WEAPONS[this.weapon].mag; // v3.10: fresh mag each round
     this.reloading = 0;
     this.lastSeen = null; this.huntTarget = null; this.idleTimer = 0;
+    this._searchSteps = 0; this._huntKind = ''; this._flanking = false; this._flankT = 0;
+    this._takingFire = false; this._calmTimer = 0; this._patrolRoute = null; this._patrolIdx = 0;
     this.path = []; this._pathGoal = null; // v3.10: BFS path resets on spawn
     // v3.13: difficulty applies here (item 8) — HP, aim, reaction, damage.
     const d = DIFFICULTY[settings.difficulty] || DIFFICULTY.normal;
@@ -572,7 +584,12 @@ export class Bot {
   // "damage is not a function" and no bot could ever be killed by a shot
   // or grenade (killfeed / _onPlayerKill / kill banners unreachable).
   // Renamed to takeDamage; the numeric `this.damage` property is untouched.
-  takeDamage(amount) {
+  // v3.16 Phase 3: SHOT REACTION — a bot that is hit turns toward the
+  // shooter, remembers the spot (lastSeen) and is alerted for 6 s, so a
+  // shot from behind is answered instead of ignored. fromPos is the
+  // shooter's position (callers in sim.js pass it); without it the old
+  // behaviour (damage only) applies.
+  takeDamage(amount, fromPos) {
     if (!this.alive) return false;
     // v3.10 (Grok, confirmed): getting shot wiped the whole plant/defuse
     // channel to 0, so a bot could almost never finish under fire. A hit
@@ -580,6 +597,14 @@ export class Bot {
     // interruption, but a 2.8/3.0 plant survives one bullet.
     this.channel = Math.max(0, this.channel * 0.5);
     this.hp -= amount;
+    if (fromPos && this.hp > 0) {
+      this.lastSeen = { x: fromPos.x, z: fromPos.z, t: this._now || 0 };
+      this._searchSteps = 0;
+      if (this.alert <= 0) { this._takingFire = true; this._heardSite = siteNameFor(fromPos, this.map); }
+      this.alert = 6;
+      this.alertPos = { x: fromPos.x, z: fromPos.z };
+      this.yaw = Math.atan2(-(fromPos.x - this.pos.x), -(fromPos.z - this.pos.z));
+    }
     if (this.hp <= 0) { this.hp = 0; this.alive = false; this.mesh.visible = false; }
     return !this.alive;
   }
@@ -587,6 +612,7 @@ export class Bot {
   // damagePlayer, onBotShot, plantSiteClear, defuseSite}.
   update(dt, ctx) {
     if (!this.alive) return;
+    this._now = ctx.time; // v3.16 Phase 3: takeDamage reads this for lastSeen.t
     const player = ctx.player;
     this._smokes = ctx.smokes || [];
     this.blindT = Math.max(0, this.blindT - dt);
@@ -596,6 +622,11 @@ export class Bot {
     if (this._heardShot && this.alert > 0) {
       this._heardShot = false;
       ctx.onRadio(this, `Heard shots ${this._heardSite} — rotating.`);
+    }
+    // v3.16 Phase 3: hit since the last update — one "taking fire" callout.
+    if (this._takingFire && this.alert > 0) {
+      this._takingFire = false;
+      ctx.onRadio(this, `Taking fire — ${this._heardSite}!`);
     }
     // --- Perception ----------------------------------------------------------
     let enemy = null; // {pos, isPlayer, bot}
@@ -621,6 +652,17 @@ export class Bot {
     if (enemy && !this._hadEnemy) {
       this.reaction = (0.25 + this.rng() * 0.35) * this.reactMult; // v3.13: difficulty
       ctx.onRadio(this, `Contact ${siteNameFor(enemy.pos, this.map)} — ${enemy.isPlayer ? 'one hostile!' : 'enemy spotted!'}`);
+      // v3.16 Phase 3: SQUAD INTEL — the spotter's callout shares the
+      // contact: teammates within 20 m get the same lastSeen, so the
+      // squad converges on a called-out enemy instead of each bot
+      // discovering it alone.
+      for (const b of ctx.bots) {
+        if (b === this || !b.alive || b.team !== this.team) continue;
+        if (b.pos.distanceTo(this.pos) < 20) {
+          b.lastSeen = { x: enemy.pos.x, z: enemy.pos.z, t: ctx.time };
+          b._searchSteps = 0;
+        }
+      }
     }
     this._hadEnemy = !!enemy;
     if (!enemy) this.reaction = Math.max(0, this.reaction - dt);
@@ -628,9 +670,17 @@ export class Bot {
     // long it has been quiet — the hunt trigger below keys off this.
     if (enemy) {
       this.lastSeen = { x: enemy.pos.x, z: enemy.pos.z, t: ctx.time };
+      this._searchSteps = 0;
       this.quietTimer = 0;
+      this._calmTimer = 0; // v3.16 Phase 3: contact ends the calm spell
     } else {
       this.quietTimer += dt;
+      // v3.16 Phase 3: the calm timer only grows while nothing is
+      // happening (no alert, no bomb activity) and is NOT reset by hunt
+      // picks — unlike quietTimer, it can actually reach the 10 s patrol
+      // threshold.
+      if (this.alert <= 0 && !ctx.bombPlanted && !ctx.bombDropped) this._calmTimer += dt;
+      else this._calmTimer = 0;
     }
     // v3.10: reload timer ticks whenever the bot is alive. Out of combat a
     // half-empty mag is topped up between fights; in combat the mag check
@@ -671,6 +721,7 @@ export class Bot {
     const isAttacker = this.team === ctx.attackTeam;
     const sitePos = this.site && ctx.map.sites[this.site] ? ctx.map.sites[this.site].center : null;
     if (ctx.bombPlanted) {
+      this._flanking = false; // v3.16 Phase 3: objective beats flanking
       const bs = ctx.map.sites[ctx.bombSite].center;
       if (isAttacker) {
         this.state = 'hold';
@@ -687,6 +738,7 @@ export class Bot {
         this.goal = { x: bs.x, z: bs.z };
       }
     } else if (ctx.bombDropped) {
+      this._flanking = false; // v3.16 Phase 3: objective beats flanking
       // v3.10: a dropped bomb must be recovered (attackers) or guarded
       // (defenders) — never ignored while the round is live.
       this.state = isAttacker ? 'recover' : 'guard';
@@ -696,6 +748,7 @@ export class Bot {
       // never takes a hunt goal or rotates to a heard shot — the bomb goes
       // to the site, always.
       if (this.isCarrier && sitePos && ctx.siteClear(this.site, this.team)) {
+        this._flanking = false; // v3.16 Phase 3: objective beats flanking
         this.state = 'plant';
         // v3.14 (item 4, round 3): only assign a new goal object when the
         // target actually changes — a fresh object every frame forced a
@@ -710,7 +763,9 @@ export class Bot {
         this.state = 'hunt';
         this.retargetTimer = 12;
         this.quietTimer = 0;
-      } else if (sitePos && (!this.goal || this.retargetTimer <= 0)) {
+      } else if (sitePos && !this._flanking && (!this.goal || this.retargetTimer <= 0)) {
+        // v3.16 Phase 3: a flanking bot keeps its flank goal — the push
+        // re-roll must not overwrite it mid-flank.
         this.goal = { x: sitePos.x + (this.rng() - 0.5) * 6, z: sitePos.z + (this.rng() - 0.5) * 6 };
         this.retargetTimer = 5;
       } else {
@@ -720,20 +775,36 @@ export class Bot {
         this.goal = { x: this.alertPos.x, z: this.alertPos.z };
       }
     } else {
-      this.state = sitePos ? 'hold' : 'patrol';
-      // v3.13: defenders hunt too — 6 s without contact and they sweep a
-      // lane instead of standing at the site all round.
-      if (this.quietTimer > 6 && (!this.goal || this.retargetTimer <= 0)) {
-        this.goal = this._pickHuntGoal(ctx);
-        this.state = 'hunt';
-        this.retargetTimer = 12;
-        this.quietTimer = 0;
-      } else if (sitePos && (!this.goal || this.retargetTimer <= 0)) {
-        this.goal = { x: sitePos.x + (this.rng() - 0.5) * 6, z: sitePos.z + (this.rng() - 0.5) * 6 };
-        this.retargetTimer = 5;
-      }
-      if (this.alert > 0 && this.alertPos && !enemy) {
-        this.goal = { x: this.alertPos.x, z: this.alertPos.z };
+      // v3.16 Phase 3: CALM PATROL — a defender calm for 10 s (no contact,
+      // no alert, no bomb activity) walks a 3-point loop around its site
+      // (or mid) instead of shuffling in one spot. The 'mid' defender
+      // (site 'mid', sitePos null) used to just stand here — 'patrol' was
+      // a state with no movement behind it.
+      const calm = !enemy && this._calmTimer > 10;
+      if (calm) {
+        this.state = 'patrol';
+        if (!this._patrolRoute) this._buildPatrolRoute(ctx);
+        if (!this.goal) {
+          this.goal = this._patrolRoute[this._patrolIdx % this._patrolRoute.length];
+          this._patrolIdx++;
+        }
+      } else {
+        this.state = sitePos ? 'hold' : 'patrol';
+        // v3.13: defenders hunt too — 6 s without contact and they sweep a
+        // lane instead of standing at the site all round.
+        if (this.quietTimer > 6 && (!this.goal || this.retargetTimer <= 0)) {
+          this.goal = this._pickHuntGoal(ctx);
+          this.state = 'hunt';
+          this.retargetTimer = 12;
+          this.quietTimer = 0;
+        } else if (sitePos && !this._flanking && (!this.goal || this.retargetTimer <= 0)) {
+          // v3.16 Phase 3: a flanking bot keeps its flank goal.
+          this.goal = { x: sitePos.x + (this.rng() - 0.5) * 6, z: sitePos.z + (this.rng() - 0.5) * 6 };
+          this.retargetTimer = 5;
+        }
+        if (this.alert > 0 && this.alertPos && !enemy) {
+          this.goal = { x: this.alertPos.x, z: this.alertPos.z };
+        }
       }
     }
     if (this.hp < 25 && enemy) this.state = 'retreat';
@@ -797,8 +868,30 @@ export class Bot {
       }
     }
     this._engageGoalT = Math.max(0, (this._engageGoalT || 0) - dt);
+    // v3.16 Phase 3: FLANKING — when two or more teammates engage the
+    // same enemy, the closest pins it (chase/strafe) while ONE other
+    // teammate walks to a waypoint on the enemy's far side. Shooting
+    // continues en route (the combat block fires on LOS regardless of
+    // movement). Objective bots and carriers never flank.
+    this._flankT = Math.max(0, (this._flankT || 0) - dt);
+    if (this._flanking && (!this.goal || this._flankT <= 0)) this._flanking = false;
+    if (enemy && !this._isObjectiveState() && this.state !== 'retreat' && !this.isCarrier && !this._flanking) {
+      const mates = ctx.bots.filter((b) => b !== this && b.alive && b.team === this.team
+        && b._hadEnemy && b.lastSeen && Math.hypot(b.lastSeen.x - enemy.pos.x, b.lastSeen.z - enemy.pos.z) < 6);
+      if (mates.length >= 1) {
+        const dMe = this.pos.distanceTo(enemy.pos);
+        const closest = mates.every((b) => dMe <= b.pos.distanceTo(enemy.pos));
+        const someoneFlanking = mates.some((b) => b._flanking);
+        if (!closest && !someoneFlanking) {
+          const fg = this._pickFlankGoal(enemy, mates[0], ctx);
+          if (fg) { this._flanking = true; this._flankT = 5; this.goal = fg; }
+        }
+      }
+    }
     if (this.goal) {
-      if (enemy && !this._isObjectiveState()) {
+      if (this._flanking) {
+        this.stepTowardGoal(dt); // walk the flank route; combat fires on LOS
+      } else if (enemy && !this._isObjectiveState()) {
         const d = this.pos.distanceTo(enemy.pos);
         if (d > 10) {
           // Close the distance — refresh the chase goal at most twice a
@@ -880,23 +973,84 @@ export class Bot {
   // v3.10 HUNT target picker. Priority: the last place an enemy was seen
   // (fresh, < 15 s) -> the heard gunshot -> attackers push the enemy spawn,
   // defenders sweep a lane waypoint near their position.
+  // v3.16 Phase 3: SEARCH — arriving at the last-seen spot and finding
+  // nothing no longer means standing there: the bot searches up to 3
+  // nearby waypoints first, and only then gives up on that contact
+  // (lastSeen cleared, falls through to sweep/spawn).
   _pickHuntGoal(ctx) {
     if (this.lastSeen && ctx.time - this.lastSeen.t < 15) {
-      return { x: this.lastSeen.x, z: this.lastSeen.z };
+      const dLast = Math.hypot(this.lastSeen.x - this.pos.x, this.lastSeen.z - this.pos.z);
+      if (dLast < 2 && (this._searchSteps || 0) < 3) {
+        this._searchSteps = (this._searchSteps || 0) + 1;
+        this._huntKind = 'search';
+        const near = ctx.map.waypoints.filter((w) => Math.hypot(w.x - this.lastSeen.x, w.z - this.lastSeen.z) < 10);
+        const w = near.length ? near[Math.floor(this.rng() * near.length)] : null;
+        if (w) return { x: w.x, z: w.z };
+      } else if (dLast >= 2) {
+        this._huntKind = 'lastseen';
+        return { x: this.lastSeen.x, z: this.lastSeen.z };
+      }
+      // Searched 3 nearby points (or none exists): give up on this contact.
+      this.lastSeen = null;
+      this._searchSteps = 0;
     }
-    if (this.alert > 0 && this.alertPos) return { x: this.alertPos.x, z: this.alertPos.z };
+    if (this.alert > 0 && this.alertPos) { this._huntKind = 'heard'; return { x: this.alertPos.x, z: this.alertPos.z }; }
     // v3.13: attackers push the ENEMY spawn (whichever team attacks this
     // round); defenders sweep a lane waypoint near their position.
     if (this.team === ctx.attackTeam) {
       const enemyTeam = this.team === 'solara' ? 'bastion' : 'solara';
       const sp = ctx.map.spawns[enemyTeam];
       const s = sp[Math.floor(this.rng() * sp.length)];
+      this._huntKind = 'spawn';
       return { x: s.x + (this.rng() - 0.5) * 4, z: s.z + (this.rng() - 0.5) * 4 };
     }
     const wps = ctx.map.waypoints;
     const near = wps.filter((w) => Math.hypot(w.x - this.pos.x, w.z - this.pos.z) < 14);
     const w = near.length ? near[Math.floor(this.rng() * near.length)] : wps[0];
+    this._huntKind = 'sweep';
     return { x: w.x, z: w.z };
+  }
+  // v3.16 Phase 3: flank waypoint — ~10 m from the enemy on the side AWAY
+  // from the pinning teammate, so the two bots attack from different
+  // angles. Returns the nearest waypoint to that point (within 18 m), or
+  // null when there is none (caller falls back to chase/strafe).
+  _pickFlankGoal(enemy, mate, ctx) {
+    const dx = enemy.pos.x - this.pos.x, dz = enemy.pos.z - this.pos.z;
+    const d = Math.hypot(dx, dz) || 1;
+    const px = -dz / d, pz = dx / d; // perpendicular to the enemy direction
+    const side = ((mate.pos.x - enemy.pos.x) * px + (mate.pos.z - enemy.pos.z) * pz) >= 0 ? -1 : 1;
+    const tx = enemy.pos.x + px * side * 10, tz = enemy.pos.z + pz * side * 10;
+    let best = null, bd = 18 * 18;
+    for (const w of ctx.map.waypoints) {
+      const dd = (w.x - tx) ** 2 + (w.z - tz) ** 2;
+      if (dd < bd) { bd = dd; best = w; }
+    }
+    return best ? { x: best.x, z: best.z } : null;
+  }
+  // v3.16 Phase 3: calm patrol loop — 3 waypoints forming a triangle
+  // around the bot's site (or the map centre for the 'mid' defender), so
+  // a calm defender walks a route instead of shuffling in one spot.
+  _buildPatrolRoute(ctx) {
+    const c = this.site && ctx.map.sites[this.site] ? ctx.map.sites[this.site].center : { x: 0, z: 0 };
+    const anchors = [{ x: c.x - 7, z: c.z }, { x: c.x, z: c.z + 7 }, { x: c.x + 7, z: c.z }];
+    const route = [];
+    for (const a of anchors) {
+      let best = null, bd = Infinity;
+      for (const w of ctx.map.waypoints) {
+        const d = (w.x - a.x) ** 2 + (w.z - a.z) ** 2;
+        if (d < bd) { bd = d; best = w; }
+      }
+      if (best && !route.includes(best)) route.push(best);
+    }
+    if (route.length < 2) {
+      // Fallback: the 3 nearest waypoints to the centre.
+      const near = [...ctx.map.waypoints].sort((p, q) =>
+        (p.x - c.x) ** 2 + (p.z - c.z) ** 2 - ((q.x - c.x) ** 2 + (q.z - c.z) ** 2)).slice(0, 3);
+      this._patrolRoute = near.map((w) => ({ x: w.x, z: w.z }));
+    } else {
+      this._patrolRoute = route.map((w) => ({ x: w.x, z: w.z }));
+    }
+    this._patrolIdx = 0;
   }
   // v3.15: nearest waypoint the enemy CANNOT see (a collider blocks the
   // sight line from the enemy's eye to the waypoint). Used by retreat so a

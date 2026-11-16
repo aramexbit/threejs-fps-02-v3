@@ -705,31 +705,9 @@ export function buildMap(scene) {
   wallSign('FOUNDRY', 'SITE A', 5, 1.25, 15, 2.6, -17.14, 0); // foundry north wall, faces south into the site
   wallSign('CRANE YARD', 'SITE B', 5, 1.25, 19.5, 2.4, 12.44, Math.PI); // boiler block north face, faces north
 
-  // --- v3.16 Phase 3b: make.fun logo billboard --------------------------------
-  // On the west face of the mid container (2,-6), facing the Solara spawn
-  // so attackers see it pushing mid. NO collider, NO nav impact (it is
-  // flush on an existing container face, above the walkable ground).
-  // Logo is 267x93 (2.87:1); plane 3.6x1.25 keeps the aspect. MeshBasic
-  // (unlit) so the white logo reads like a backlit billboard.
-  const logoTex = new THREE.TextureLoader().load('assets/makefun-logo.png', () => {
-    window.__makefunLogoLoaded = true; // probe flag (3b)
-  });
-  logoTex.colorSpace = THREE.SRGBColorSpace;
-  logoTex.anisotropy = 8;
-  const boardBack = new THREE.Mesh(
-    new THREE.PlaneGeometry(3.85, 1.4),
-    new THREE.MeshStandardMaterial({ color: 0x17191d, roughness: 0.6, metalness: 0.4 }),
-  );
-  boardBack.position.set(0.68, 1.9, -6);
-  boardBack.rotation.y = -Math.PI / 2;
-  group.add(boardBack);
-  const logoBoard = new THREE.Mesh(
-    new THREE.PlaneGeometry(3.6, 1.25),
-    new THREE.MeshBasicMaterial({ map: logoTex }),
-  );
-  logoBoard.position.set(0.64, 1.9, -6);
-  logoBoard.rotation.y = -Math.PI / 2;
-  group.add(logoBoard);
+  // v3.16 Phase 4a: the make.fun logo billboard (Phase 3b) was REMOVED on
+  // user order 16 Nov 17:03 ("buang spanduknya") — no board, no logo
+  // texture load, no probe flag. The mid container face is bare again.
 
   scene.add(group);
 

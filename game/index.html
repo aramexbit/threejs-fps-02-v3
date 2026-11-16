@@ -244,23 +244,34 @@
   .tbtn-jump { width: 56px; height: 56px; right: 116px; bottom: 116px; font-size: 12px; }
   .tbtn-crouch { width: 56px; height: 56px; right: 196px; bottom: 32px; font-size: 11px; }
   .tbtn-action { width: 56px; height: 56px; right: 196px; bottom: 116px; font-size: 16px; }
-  /* v3.15 — layout sentuh: panel HP pindah ke kanan joystick, panel senjata
-     naik di atas klaster tombol, minimap + tombol mengecil. */
-  body.touch .bl { left: 168px; bottom: 16px; width: 158px; padding: 8px 10px; font-size: 12px; }
-  body.touch .chat { left: 168px; bottom: 138px; max-width: 52vw; font-size: 11px; }
-  body.touch .br { right: 14px; bottom: 218px; padding: 8px 10px; }
+  /* v3.15 — layout sentuh (390 px): tumpukan vertikal yang diukur supaya
+     TIDAK ADA yang saling menutupi. (Versi pertama menabrak: kompas di
+     bawah minimap + objektif, panel HP di bawah tombol CROUCH/FIRE,
+     panel senjata menabrak prompt plant — terlihat di hud-mobile.jpg.)
+     Atas (390x844): kompas y8-34 | minimap 84px kanan y8-92 | objektif
+     y40-88 kiri | skor y96-124 | timer y130-166 | pips y172-194 |
+     difftag y200-222 | gear/help y232-264 | feed dari y272.
+     Bawah: tombol berakhir di bottom:172 | panel HP bottom:180 kiri |
+     panel senjata bottom:186 kanan | prompt plant bottom:44%. */
+  body.touch .compass canvas { width: 200px; height: 26px; }
+  body.touch .minimap { width: 84px; height: 84px; }
+  body.touch .bomb-status { top: 40px; max-width: 190px; font-size: 11px; }
+  body.touch .score { top: 96px; font-size: 11px; padding: 5px 10px; gap: 8px; }
+  body.touch .timer { top: 130px; font-size: 22px; }
+  body.touch .pips { top: 172px; }
+  body.touch .difftag { top: 200px; }
+  body.touch .gearbtn { top: 232px; }
+  body.touch .helpbtn { top: 232px; }
+  body.touch .feed { top: 272px; font-size: 11px; }
+  body.touch .bl { left: 14px; bottom: 180px; width: 150px; padding: 8px 10px; font-size: 12px; }
+  body.touch .chat { display: none; }
+  body.touch .br { right: 14px; bottom: 186px; padding: 8px 10px; }
   body.touch .br .ammo { font-size: 30px; }
-  body.touch .minimap { width: 110px; height: 110px; }
-  body.touch .gearbtn { top: 138px; }
-  body.touch .helpbtn { top: 138px; }
-  body.touch .feed { top: 188px; font-size: 11px; }
-  body.touch .killbanner { top: 340px; font-size: 19px; }
-  body.touch .multibanner { top: 388px; font-size: 18px; }
+  body.touch .killbanner { top: 380px; font-size: 19px; }
+  body.touch .multibanner { top: 428px; font-size: 18px; }
   body.touch .banner { font-size: 22px; }
-  body.touch .plantprompt { font-size: 12px; bottom: 38%; }
+  body.touch .plantprompt { font-size: 12px; bottom: 44%; }
   body.touch .plantprompt-big { font-size: 18px; }
-  body.touch .compass canvas { width: 260px; height: 26px; }
-  body.touch .bomb-status { max-width: 46vw; font-size: 11px; }
   /* v3.15 — responsif PC: layar sempit mengecilkan HUD, tidak terpotong. */
   @media (max-width: 900px) {
     .minimap { width: 110px; height: 110px; }

@@ -69,8 +69,8 @@ export function normalizeRifle(gltf) {
   // Gloved hands, same spots as the primitive AR-77 (grip + foregrip),
   // so the rifle reads as held, not floating. Named so a bot-rifle clone
   // (v3.10) can strip them — the bot mesh has its own arms.
-  const hand1 = glovedHand(0, -0.07, 0.15, 0.2); hand1.name = 'vm-hand';
-  const hand2 = glovedHand(0.01, -0.06, -0.18, 0.08); hand2.name = 'vm-hand';
+  const hand1 = glovedHand(0, -0.07, 0.15, 0.2); // grip hand (side +1 default)
+  const hand2 = glovedHand(0.01, -0.06, -0.18, 0.08, -1); // support hand
   group.add(hand1);
   group.add(hand2);
   const muzzle = new THREE.Object3D();

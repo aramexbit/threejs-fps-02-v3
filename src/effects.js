@@ -379,3 +379,79 @@ export class Explosion {
     this.light.intensity = Math.max(0, 220 * (this.t / 0.6));
   }
 }
+
+// --- Spent shell casings ---------------------------------------------------------
+// One InstancedMesh (16 brass boxes, 1 draw call). Each shot ejects a casing
+// to the shooter's right with an upward flick and a random tumble; it bounces
+// once on the snow, then shrinks away after 1.4 s. Ring buffer — a new shot
+// reuses the oldest slot.
+export class CasingPool {
+  constructor(scene, max = 16) {
+    this.max = max;
+    this.mesh = new THREE.InstancedMesh(
+      new THREE.BoxGeometry(0.012, 0.028, 0.012),
+      new THREE.MeshStandardMaterial({ color: 0xc8a24a, metalness: 0.85, roughness: 0.35 }),
+      max,
+    );
+    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.mesh.frustumCulled = false;
+    this.items = [];
+    const hidden = new THREE.Matrix4().makeScale(0, 0, 0);
+    for (let i = 0; i < max; i++) {
+      this.items.push({
+        alive: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(),
+        rot: new THREE.Euler(), rotVel: new THREE.Vector3(), life: 0,
+      });
+      this.mesh.setMatrixAt(i, hidden);
+    }
+    this.next = 0;
+    scene.add(this.mesh);
+  }
+  eject(pos, yaw, rng) {
+    const it = this.items[this.next];
+    this.next = (this.next + 1) % this.max;
+    // Right of the shooter + up, slight forward drift, random tumble.
+    const rx = Math.cos(yaw), rz = -Math.sin(yaw);
+    const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+    it.pos.copy(pos);
+    it.vel.set(rx * (1.1 + rng() * 0.8) + fx * 0.3, 1.6 + rng() * 0.8, rz * (1.1 + rng() * 0.8) + fz * 0.3);
+    it.rot.set(rng() * Math.PI, rng() * Math.PI, 0);
+    it.rotVel.set((rng() - 0.5) * 20, (rng() - 0.5) * 20, (rng() - 0.5) * 20);
+    it.life = 1.4;
+    it.alive = true;
+  }
+  update(dt) {
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3();
+    let any = false;
+    for (let i = 0; i < this.max; i++) {
+      const it = this.items[i];
+      if (!it.alive) continue;
+      any = true;
+      it.life -= dt;
+      if (it.life <= 0) {
+        it.alive = false;
+        m.makeScale(0, 0, 0);
+        this.mesh.setMatrixAt(i, m);
+        continue;
+      }
+      it.vel.y -= 9.8 * dt;
+      it.pos.addScaledVector(it.vel, dt);
+      if (it.pos.y < 0.015) {
+        it.pos.y = 0.015;
+        it.vel.y *= -0.35; it.vel.x *= 0.6; it.vel.z *= 0.6;
+        it.rotVel.multiplyScalar(0.5);
+      }
+      it.rot.x += it.rotVel.x * dt; it.rot.y += it.rotVel.y * dt; it.rot.z += it.rotVel.z * dt;
+      q.setFromEuler(it.rot);
+      const sc = it.life < 0.3 ? it.life / 0.3 : 1;
+      m.compose(it.pos, q, s.setScalar(sc));
+      this.mesh.setMatrixAt(i, m);
+    }
+    if (any) this.mesh.instanceMatrix.needsUpdate = true;
+  }
+  get liveCount() {
+    let n = 0;
+    for (const it of this.items) if (it.alive) n++;
+    return n;
+  }
+}

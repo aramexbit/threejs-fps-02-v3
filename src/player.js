@@ -68,6 +68,8 @@ export class Player {
     this.hasKit = false; // defuse kit: defuse 2.5 s instead of 5 s
     this.hasBomb = false;
     this.recoil = 0; this.recoilPitch = 0;
+    this.recoilYaw = 0; // v3.16 Phase 2: horizontal recoil kick (signed)
+    this.inspectT = 0; // v3.16 Phase 2: weapon-inspection timer (1.4 s)
     this.bobPhase = 0; this.stepTimer = 0;
     // v3.16 Phase 1: lean (-1 left .. +1 right, smoothed), weapon sway
     // from mouse movement, sprint pose blend, landing dip, smoothed eye Y.
@@ -100,6 +102,7 @@ export class Player {
 
   equip(index) {
     if (index < 0 || index >= this.slots.length) return;
+    this.inspectT = 0; // v3.16 Phase 2: switching cancels the inspection
     this.slot = index;
     if (this.viewmodel) this.camera.remove(this.viewmodel);
     // v3.7: the AR-77 uses the CC0 SCAR-L GLB once loaded (cloned per
@@ -281,6 +284,14 @@ export class Player {
     this.swayY *= Math.max(0, 1 - dt * 5);
     // Recoil recovery + view bob + footsteps.
     this.recoilPitch = Math.max(0, this.recoilPitch - dt * 0.06);
+    // v3.16 Phase 2: horizontal kick decays toward zero the same way.
+    this.recoilYaw -= Math.sign(this.recoilYaw) * Math.min(Math.abs(this.recoilYaw), dt * 0.06);
+    // v3.16 Phase 2: inspection ends on reload/throw; firing cancels it
+    // in tryFire, switching cancels it in equip().
+    if (this.inspectT > 0) {
+      if (this.weapon.reloading > 0 || this.throwAnim) this.inspectT = 0;
+      else this.inspectT = Math.max(0, this.inspectT - dt);
+    }
     const moving = Math.hypot(this.vel.x, this.vel.z);
     if (moving > 0.5) {
       this.bobPhase += dt * moving * 1.6;
@@ -355,7 +366,7 @@ export class Player {
     this.camera.rotation.order = 'YXZ';
     this.camera.rotation.set(
       this.pitch - 0.25 * deathEase + this.recoilPitch + (shake > 0 ? (Math.sin(t * 71) * 0.012 * shake) : 0),
-      this.yaw + (shake > 0 ? (Math.cos(t * 63) * 0.012 * shake) : 0),
+      this.yaw + this.recoilYaw + (shake > 0 ? (Math.cos(t * 63) * 0.012 * shake) : 0),
       0.5 * deathEase + leanRoll,
     );
     // v3.14 (item 1): Longbow-7 ADS is a real SCOPE — FOV 22 (~3.4x zoom),
@@ -415,13 +426,17 @@ export class Player {
       // would fill the frame as a giant slab; the scope overlay is the
       // whole sight picture). Dead — the gun is dropped on death.
       if ((isScoped || !this.alive) && this.viewmodel) this.viewmodel.visible = false;
+      // v3.16 Phase 2: weapon inspection — the rifle rolls to show its
+      // side (sine ease over the 1.4 s inspect). insp runs 0 -> 1 -> 0.
+      let insp = 0;
+      if (this.inspectT > 0) insp = Math.sin((1 - this.inspectT / 1.4) * Math.PI);
       this.viewmodel.position.set(
-        vm.x * (1 - ads) + bobX * 0.4 * (1 - dip * 0.7) + this.lean * 0.04 + this.swayX,
-        vm.y + bobY * 0.5 * (1 - dip * 0.7) + (ads ? 0.055 + lift : 0) - dip * rd + swing * 0.10 + this.swayY - this._sprintPose * 0.05,
+        vm.x * (1 - ads) + bobX * 0.4 * (1 - dip * 0.7) + this.lean * 0.04 + this.swayX - insp * 0.05,
+        vm.y + bobY * 0.5 * (1 - dip * 0.7) + (ads ? 0.055 + lift : 0) - dip * rd + swing * 0.10 + this.swayY - this._sprintPose * 0.05 - insp * 0.08,
         vm.z + kick + (ads ? -0.30 : 0) + dip * 0.05 - swing * 0.18,
       );
-      this.viewmodel.rotation.x = this.recoilPitch * 1.4 + Math.sin(this.bobPhase) * 0.008 + dip * rt + swing * 0.6 + this.swayY * 2 + this._sprintPose * 0.45;
-      this.viewmodel.rotation.z = dip * 0.35 + this.lean * 0.18 + this._sprintPose * 0.25;
+      this.viewmodel.rotation.x = this.recoilPitch * 1.4 + Math.sin(this.bobPhase) * 0.008 + dip * rt + swing * 0.6 + this.swayY * 2 + this._sprintPose * 0.45 + insp * 0.35;
+      this.viewmodel.rotation.z = dip * 0.35 + this.lean * 0.18 + this._sprintPose * 0.25 + insp * 0.9;
       // v3.12: spare-mag prop — old mag drops out, fresh mag rises back
       // into the well. v3.13: the path starts at THIS weapon's mag well
       // (item 2) and drops OUT to the shooter's left, silhouetted against
@@ -453,10 +468,21 @@ export class Player {
     this.flashT = Math.max(0, this.flashT - 0.05);
   }
 
+  // v3.16 Phase 2: weapon inspection (T) — 1.4 s, cosmetic only: the
+  // viewmodel rolls to show the weapon's side. Blocked while throwing or
+  // reloading; firing or switching cancels it.
+  startInspect() {
+    if (this.throwAnim || (this.weapon && this.weapon.reloading > 0) || !this.alive) return false;
+    if (this.inspectT > 0) return false;
+    this.inspectT = 1.4;
+    return true;
+  }
+
   // Fire the current weapon. Returns a shot event for sim.js to resolve.
   tryFire(t, rng) {
     // v3.13: no shooting mid-throw — the hands are busy with the grenade.
     if (this.throwAnim) return null;
+    this.inspectT = 0; // v3.16 Phase 2: firing cancels the inspection
     const w = this.weapon;
     if (!w.fire(t)) {
       // v3.9: auto-reload on empty. Without it the gun goes dead after the
@@ -476,11 +502,20 @@ export class Player {
     const spread = Math.max(0.001, spreadBase + this.recoil * 0.004);
     this.recoil = Math.min(0.05, this.recoil + w.def.recoil * 0.5);
     this.recoilPitch += w.def.recoil * 0.55;
+    // v3.16 Phase 2: horizontal kick — same per-weapon magnitude, random
+    // side each shot (seeded rng, so replays stay deterministic).
+    this.recoilYaw += (rng() - 0.5) * w.def.recoil * 0.6;
     this.flashT = 0.05;
     this.audio.shot(w.def.kind);
     // Muzzle world position for the flash + smoke.
     const mw = new THREE.Vector3();
     this.muzzle.getWorldPosition(mw);
+    // v3.16 Phase 2: eject a spent casing from the receiver (muzzle pulled
+    // back 0.35 m along the aim) — right + up with a random tumble.
+    if (this.fx.casings) {
+      const fwd0 = new THREE.Vector3(0, 0, -1).applyEuler(this.camera.rotation);
+      this.fx.casings.eject(mw.clone().addScaledVector(fwd0, -0.35), this.yaw, rng);
+    }
     // v3.8: the flash blooms 0.2 m past the muzzle along the aim, so the
     // starburst sits in open air instead of inside the barrel tip (where
     // the front sight + bright snow wash it out).

@@ -88,8 +88,11 @@ export function segmentBlocked(x0, z0, x1, z1, colliders) {
 export function buildMap(scene) {
   const group = new THREE.Group();
   const colliders = [];
-  const addCollider = (x, z, hw, hd, h = 3) => {
-    colliders.push({ minX: x - hw, maxX: x + hw, minZ: z - hd, maxZ: z + hd, h });
+  // v3.16 Phase 2: every collider carries its surface material so bullet
+  // impacts can differ per material (metal sparks, concrete dust, wood
+  // chips, sand puff, rock chips, snow). Default 'concrete'.
+  const addCollider = (x, z, hw, hd, h = 3, mat = 'concrete') => {
+    colliders.push({ minX: x - hw, maxX: x + hw, minZ: z - hd, maxZ: z + hd, h, mat });
   };
   const snow = snowTextures(11);
   const concrete = concreteTextures(23);
@@ -138,7 +141,7 @@ export function buildMap(scene) {
   ];
   for (const [x, z, w, d] of walls) {
     group.add(boxAt(concMat, w, wallH, d, x, wallH / 2, z));
-    addCollider(x, z, w / 2, d / 2, wallH);
+    addCollider(x, z, w / 2, d / 2, wallH, 'concrete');
   }
 
   // --- Site A: the Foundry (concrete U, open west) ----------------------------
@@ -149,9 +152,9 @@ export function buildMap(scene) {
     group.add(boxAt(concMat, 11, 4.5, 0.8, cx, 2.25, cz - 5.6)); // north wall
     group.add(boxAt(concMat, 11, 4.5, 0.8, cx, 2.25, cz + 5.6)); // south wall
     group.add(boxAt(concMat, 0.8, 4.5, 12, cx + 5.6, 2.25, cz)); // east wall
-    addCollider(cx, cz - 5.6, 5.5, 0.4, 4.5);
-    addCollider(cx, cz + 5.6, 5.5, 0.4, 4.5);
-    addCollider(cx + 5.6, cz, 0.4, 6, 4.5);
+    addCollider(cx, cz - 5.6, 5.5, 0.4, 4.5, 'concrete');
+    addCollider(cx, cz + 5.6, 5.5, 0.4, 4.5, 'concrete');
+    addCollider(cx + 5.6, cz, 0.4, 6, 4.5, 'concrete');
     // Furnace: dark box with a glowing orange mouth (fire spot).
     const furnace = boxAt(darkSteel, 2.2, 2.6, 1.6, cx + 3.2, 1.3, cz - 2.6);
     group.add(furnace);
@@ -162,7 +165,7 @@ export function buildMap(scene) {
     mouth.position.set(cx + 2.05, 1.1, cz - 2.6);
     mouth.rotation.y = -Math.PI / 2;
     group.add(mouth);
-    addCollider(cx + 3.2, cz - 2.6, 1.1, 0.8, 2.6);
+    addCollider(cx + 3.2, cz - 2.6, 1.1, 0.8, 2.6, 'metal');
     // Pipes along the north wall.
     group.add(cylAt(steelMat, 0.22, 0.22, 10.4, cx, 3.6, cz - 5.1, 10));
     const pipe = group.children[group.children.length - 1];
@@ -192,12 +195,12 @@ export function buildMap(scene) {
     // opens up; the tank and chimney move with it. Waypoints (15,8), (17,12)
     // and (19,12) all stay clear of the new colliders.
     group.add(boxAt(concMat, 6, 4, 5, cx + 4.5, 2, cz + 3)); // boiler block
-    addCollider(cx + 4.5, cz + 3, 3, 2.5, 4);
+    addCollider(cx + 4.5, cz + 3, 3, 2.5, 4, 'concrete');
     group.add(cylAt(steelMat, 1.1, 1.1, 3.4, cx + 2, 1.7, cz - 3.5, 16)); // water tank
-    addCollider(cx + 2, cz - 3.5, 1.1, 1.1, 3.4);
+    addCollider(cx + 2, cz - 3.5, 1.1, 1.1, 3.4, 'metal');
     const chimney = cylAt(darkSteel, 0.45, 0.6, 7, cx + 6, 3.5, cz + 5.5, 12);
     group.add(chimney);
-    addCollider(cx + 6, cz + 5.5, 0.6, 0.6, 7);
+    addCollider(cx + 6, cz + 5.5, 0.6, 0.6, 7, 'metal');
   };
   boiler(SITES.B.center.x, SITES.B.center.z);
 
@@ -231,7 +234,7 @@ export function buildMap(scene) {
     // Cable + hook hanging over the yard.
     group.add(cylAt(darkSteel, 0.03, 0.03, 5.5, cx - 8.5, H - 1.4, cz, 6));
     group.add(boxAt(darkSteel, 0.5, 0.7, 0.4, cx - 8.5, H - 4.4, cz));
-    addCollider(cx, cz, 1.3, 1.3, H);
+    addCollider(cx, cz, 1.3, 1.3, H, 'metal');
   };
   crane(12, 10);
 
@@ -239,7 +242,7 @@ export function buildMap(scene) {
   const container = (x, z, mat, ry = 0, len = 6) => {
     group.add(boxAt(mat, len, 2.6, 2.6, x, 1.3, z, ry));
     const hw = ry === 0 ? len / 2 : 1.3, hd = ry === 0 ? 1.3 : len / 2;
-    addCollider(x, z, hw, hd, 2.6);
+    addCollider(x, z, hw, hd, 2.6, 'metal');
     // Snow cap on top.
     const cap = boxAt(std({ color: 0xe8edf2, roughness: 0.9, metalness: 0 }), len * 0.98, 0.12, 2.55, x, 2.66, z, ry);
     cap.castShadow = false;
@@ -261,7 +264,7 @@ export function buildMap(scene) {
         group.add(s);
       }
     }
-    addCollider(x, z, 1.8, 0.5, 1.3);
+    addCollider(x, z, 1.8, 0.5, 1.3, 'sand');
   };
   sandbags(-12, 0, 0);
   sandbags(6, -2, Math.PI / 2);
@@ -274,7 +277,7 @@ export function buildMap(scene) {
     g.add(boxAt(woodMat, 0.18, 1.3, 0.18, 1.0, 0.65, 0));
     g.add(boxAt(woodMat, 2.4, 0.14, 0.14, 0, 0.35, 0));
     group.add(g);
-    addCollider(x, z, 1.3, 0.4, 1.3);
+    addCollider(x, z, 1.3, 0.4, 1.3, 'wood');
   };
   barricade(-6, -12, 0.2);
   barricade(4, 12, -0.15);
@@ -289,7 +292,7 @@ export function buildMap(scene) {
       log.rotation.y = rnd() * Math.PI;
       group.add(log);
     }
-    addCollider(x, z, 1.0, 1.0, 1.0);
+    addCollider(x, z, 1.0, 1.0, 1.0, 'wood');
   };
   firewood(0, 6);
   // Destruction detail (Gemini realism pass): rubble + rebar around the mid
@@ -378,7 +381,7 @@ export function buildMap(scene) {
     }
     group.add(g);
     treeGroups.push(g);
-    addCollider(x, z, 0.3, 0.3, 3.2);
+    addCollider(x, z, 0.3, 0.3, 3.2, 'wood');
   };
   tree(-18, -14, 1.2); tree(-16, 14, 1); tree(18, -15, 1.1);
   tree(-10, 15.5, 0.9); tree(4, -15.5, 1); tree(-19, 6, 1.15);
@@ -392,7 +395,7 @@ export function buildMap(scene) {
     r.scale.y = 0.65;
     r.castShadow = true; r.receiveShadow = true;
     group.add(r);
-    addCollider(x, z, s * 0.8, s * 0.8, s);
+    addCollider(x, z, s * 0.8, s * 0.8, s, 'rock');
   }
 
   // --- v3.4 organic shapes pass ------------------------------------------------
@@ -461,7 +464,7 @@ export function buildMap(scene) {
       rock.scale.y = 0.7;
       rock.castShadow = true; rock.receiveShadow = true;
       group.add(rock);
-      if (solid) addCollider(x, z, r * 0.8, r * 0.8, r);
+      if (solid) addCollider(x, z, r * 0.8, r * 0.8, r, 'rock');
     }
   }
 
@@ -485,7 +488,7 @@ export function buildMap(scene) {
     }
     group.add(g);
     pineGroups.push({ g, s });
-    if (solid) addCollider(x, z, 0.3, 0.3, 6 * s);
+    if (solid) addCollider(x, z, 0.3, 0.3, 6 * s, 'wood');
   };
   pine(-27, -4, 1.1, false); pine(-28, 16, 1.3, false); pine(27, -16, 1.2, false);
   pine(28, 6, 1.3, false); pine(-6, -27, 1.1, false); pine(18, 27, 1.3, false); pine(-16, 27, 1.2, false);
@@ -546,7 +549,7 @@ export function buildMap(scene) {
       const barrel = cylAt(bRnd() < 0.5 ? steelMat : darkSteel, 0.32, 0.32, 0.85, x, 0.43, z, 12);
       group.add(barrel);
       group.add(cylAt(darkSteel, 0.33, 0.33, 0.06, x, 0.82, z, 12)); // rim
-      addCollider(x, z, 0.32, 0.32, 0.85);
+      addCollider(x, z, 0.32, 0.32, 0.85, 'metal');
     }
   };
   barrelCluster([[-9.7, -9.62], [-8.9, -9.62], [-9.3, -10.15]], 3404); // container (-8,-8) north face
@@ -611,7 +614,7 @@ export function buildMap(scene) {
     );
     lamp.position.set(x, 5.42, z + 0.21);
     group.add(lamp);
-    addCollider(x, z, 0.2, 0.2, 5.5);
+    addCollider(x, z, 0.2, 0.2, 5.5, 'metal');
   }
 
   // --- Mid-lane rubble: break up the flat snow --------------------------------

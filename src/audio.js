@@ -69,11 +69,31 @@ export class AudioSys {
     o.start(t0); o.stop(t0 + dur);
   }
   shot(kind) {
+    // _shotCalls counts BEFORE ensure() so headless probes can verify the
+    // call path (no AudioContext there), like hurt()'s _hurtCalls.
+    this._shotCalls = (this._shotCalls || 0) + 1;
+    this._lastShotKind = kind;
     if (!this.ensure()) return;
-    if (kind === 'sniper') { this._burst(0.35, 900, 'lowpass', 0.9); this._tone(160, 0.18, 'sawtooth', 0.25, 60); }
-    else if (kind === 'smg') { this._burst(0.12, 1600, 'bandpass', 0.55); }
-    else if (kind === 'pistol') { this._burst(0.16, 1200, 'bandpass', 0.6); }
-    else { this._burst(0.2, 1100, 'bandpass', 0.7); this._tone(120, 0.1, 'square', 0.12, 70); }
+    // v3.16 Phase 2: per-shot variation — the same kind never sounds
+    // identical twice (filter/tone detuned ±8% each shot).
+    const det = 0.92 + Math.random() * 0.16;
+    if (kind === 'sniper') { this._burst(0.35, 900 * det, 'lowpass', 0.9); this._tone(160 * det, 0.18, 'sawtooth', 0.25, 60); }
+    else if (kind === 'smg') { this._burst(0.12, 1600 * det, 'bandpass', 0.55); }
+    else if (kind === 'pistol') { this._burst(0.16, 1200 * det, 'bandpass', 0.6); }
+    else { this._burst(0.2, 1100 * det, 'bandpass', 0.7); this._tone(120 * det, 0.1, 'square', 0.12, 70); }
+  }
+  // v3.16 Phase 2: bullet impact sound per surface material — metal pings,
+  // wood knocks, snow/sand thud soft, concrete/rock thud hard.
+  impact(mat) {
+    this._impactCalls = (this._impactCalls || 0) + 1;
+    this._lastImpactMat = mat;
+    if (!this.ensure()) return;
+    if (mat === 'metal') { this._burst(0.08, 3500, 'bandpass', 0.25); this._tone(2400, 0.06, 'sine', 0.1); }
+    else if (mat === 'wood') { this._burst(0.09, 900, 'bandpass', 0.25); }
+    else if (mat === 'snow') { this._burst(0.12, 500, 'lowpass', 0.18); }
+    else if (mat === 'sand') { this._burst(0.1, 700, 'lowpass', 0.2); }
+    else if (mat === 'rock') { this._burst(0.07, 2000, 'bandpass', 0.22); }
+    else { this._burst(0.09, 300, 'lowpass', 0.25); } // concrete
   }
   dryFire() { if (this.ensure()) this._tone(1400, 0.04, 'square', 0.08); }
   reload() {

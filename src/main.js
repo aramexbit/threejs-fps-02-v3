@@ -16,7 +16,7 @@ import { Sim } from './sim.js';
 import { Input } from './input.js';
 import { HUD } from './hud.js';
 import { AudioSys } from './audio.js';
-import { ParticleSystem, MuzzleFlash, DecalPool, Fire, ChimneySmoke, Snowfall, Explosion, TracerPool } from './effects.js';
+import { ParticleSystem, MuzzleFlash, DecalPool, Fire, ChimneySmoke, Snowfall, Explosion, TracerPool, CasingPool } from './effects.js';
 import { mulberry32 } from './rng.js';
 import { loadRifle, loadPine } from './models.js';
 import { setTextureAnisotropy } from './textures.js';
@@ -60,6 +60,7 @@ const fx = {
   decals: new DecalPool(scene),
   explosion: null,
   tracers: new TracerPool(scene), // Gemini realism pass: shot streaks
+  casings: new CasingPool(scene), // v3.16 Phase 2: spent shell casings
 };
 fx.explosion = new Explosion(scene, fx.particles);
 const fires = [];
@@ -445,6 +446,7 @@ function frame(now) {
   fx.decals.update(dt);
   fx.explosion.update(dt);
   fx.tracers.update(dt); // Gemini realism pass
+  fx.casings.update(dt); // v3.16 Phase 2: spent shell casings
   for (const f of fires) f.update(dt, fx.particles);
   for (const c of chimneys) c.update(dt, fx.particles);
   snowfall.update(dt, t, player.pos.x, player.pos.z);

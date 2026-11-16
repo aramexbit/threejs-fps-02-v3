@@ -51,6 +51,11 @@ export class Sim {
     this.attackTeam = 'solara'; // team attacking THIS round
     this.plantTeam = null; // team that planted the bomb this round (null until planted)
     this.stats = new Map(); // v3.13 match stats: entity -> {name, team, kills, deaths, assists, hsKills, damage, earned}
+    // v3.16 Phase 4e: per-round winners in order (for the scoreboard's
+    // round pips) + plants/defuses per entity (scoreboard columns).
+    // Real numbers only — pushed/counted at the exact places the game
+    // already resolves them, never invented.
+    this.roundResults = [];
     this.lastRoundReason = ''; // v3.16 Phase 3a: reason of the last round (scoreboard win line)
     this.botGrenades = []; // v3.13: bot-thrown HE grenades {pos, vel, fuse, team, thrower}
   }
@@ -65,6 +70,7 @@ export class Sim {
       row = {
         name: isPlayer ? 'You' : ent.name, team: isPlayer ? 'solara' : ent.team,
         kills: 0, deaths: 0, assists: 0, hsKills: 0, damage: 0, earned: 0,
+        plants: 0, defuses: 0, // v3.16 Phase 4e: scoreboard PLANTS / DEFUSES columns
       };
       this.stats.set(ent, row);
     }
@@ -91,7 +97,7 @@ export class Sim {
     }
     victim.lastHitBy = null;
   }
-  resetMatchStats() { this.stats.clear(); }
+  resetMatchStats() { this.stats.clear(); this.roundResults = []; }
   // v3.13: full match reset (MAIN LAGI / play again). Economy + loadout
   // reset to the round-1 state, scores and stats cleared, attack back to
   // Solara. Called by main.js; startRound() does the per-round respawn.
@@ -200,8 +206,11 @@ export class Sim {
         this.radio(carrier, `I have the bomb — pushing ${carrier.site}. Cover me!`, true);
       }
     }
-    const role = this.attackTeam === 'solara' ? 'ATTACK — PLANT THE BOMB' : 'DEFEND — STOP THE BOMB';
-    this.setBanner(`ROUND ${this.round} — ${this.round === 1 ? 'FROSTLINE' : role}`, 3);
+    // v3.16 Phase 4e: the sides swap every round (attack alternates), so
+    // from round 2 the round-start banner IS the transition banner
+    // (CODM f-02 pattern). Kept short — the role is already in the
+    // mission line, and the full "— <role>" version overflowed the width.
+    this.setBanner(this.round === 1 ? `ROUND ${this.round} — FROSTLINE` : `ROUND ${this.round} — SWITCHING SIDES`, 3);
     // Round-start plan callout from a Solara bot (throttle reset each round).
     this.radioT = -99; this.radioPerBot.clear();
     const caller = this.bots.find((b) => b.team === 'solara' && b.alive);
@@ -234,6 +243,7 @@ export class Sim {
     this.lastRoundReason = reason;
     this.timer = 4;
     this.score[winner]++;
+    this.roundResults.push(winner); // v3.16 Phase 4e: round pips (in order)
     const p = this.player;
     let bonus = 0;
     if (winner === 'solara') {
@@ -347,6 +357,7 @@ export class Sim {
       this.player.hasBomb = false;
       this.player.money += 300;
       this._stat(this.player).earned += 300;
+      this._stat(this.player).plants++; // v3.16 Phase 4e: scoreboard PLANTS
     }
     this.audio.beep(true);
     this.events.push({ type: 'plant', site });
@@ -357,6 +368,7 @@ export class Sim {
     // whoever planted. The old code always awarded Bastion, so a player
     // defusing (in a Bastion-attack round) LOST the round they just won.
     this.bombPlanted = false;
+    this._stat(this.player).defuses++; // v3.16 Phase 4e: scoreboard DEFUSES
     this.audio.beep(true);
     this.events.push({ type: 'defuse' });
     const defenders = this.plantTeam === 'solara' ? 'bastion' : 'solara';
@@ -375,11 +387,13 @@ export class Sim {
     if (this.bombPlanted || this.phase !== 'round' || !this.map.sites[bot.site]) return;
     this._plant(bot.site, bot.team, false);
     this._stat(bot).earned += 300;
+    this._stat(bot).plants++; // v3.16 Phase 4e: scoreboard PLANTS
     this.radio(bot, `Bomb planted ${bot.site} — hold the site!`, true);
   }
   onBotDefuse(bot) {
     if (!this.bombPlanted) return;
     this.bombPlanted = false;
+    this._stat(bot).defuses++; // v3.16 Phase 4e: scoreboard DEFUSES
     this.radio(bot, `Bomb defused — site ${this.bombSite} clear.`, true);
     // v3.13: a defusing bot wins the round for ITS OWN team (the defence).
     this.endRound(bot.team, 'BOMB DEFUSED');

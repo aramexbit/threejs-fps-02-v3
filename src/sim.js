@@ -408,7 +408,7 @@ export class Sim {
       if (d < R) {
         const dmg = Math.round(DMG * (1 - d / R));
         this._addDamage(thrower, b, dmg);
-        const died = b.takeDamage(dmg);
+        const died = b.takeDamage(dmg, thrower && thrower.pos); // v3.16 Phase 3: shot reaction knows the thrower
         if (died) {
           if (b.isCarrier) { b.isCarrier = false; this.dropBomb(b.pos, b); }
           this._addKill(thrower, b, false);
@@ -505,7 +505,7 @@ export class Sim {
       const mult = best.part === 'head' ? weapon.def.headMult : best.part === 'legs' ? 0.75 : 1;
       const dmg = Math.round(weapon.def.damage * mult);
       this._addDamage(this.player, best.bot, dmg); // v3.13: match stats
-      const killed = best.bot.takeDamage(dmg);
+      const killed = best.bot.takeDamage(dmg, this.player.pos); // v3.16 Phase 3: shot reaction knows the shooter
       this.audio.hit();
       // v3.9 (DeepSeek): the hitmarker never showed — push the event so
       // the HUD flashes it on every landed hit (red on headshot).
@@ -560,6 +560,12 @@ export class Sim {
     const mp = bot.eye.clone();
     this.fx.flash.fire(mp);
     this.fx.particles.smoke(mp, 1, 0.1, 0.3, 0.8);
+    // v3.16 Phase 3: HEARING — a bot's gunfire alerts every other living
+    // bot within 25 m (same range as the player's shots, which already
+    // broadcast from the fire branch). Firefights are audible now, so
+    // bots rotate to a teammate's fight instead of ignoring it. The
+    // shooter is skipped (its own shot is not new information).
+    for (const b of this.bots) if (b.alive && b !== bot) b.hearShot(bot.pos);
     // v3.16 Phase 2: bots eject casings too (same pool as the player).
     if (this.fx.casings) this.fx.casings.eject(mp, bot.yaw || 0, this.rng);
     if (!hit) {
@@ -597,7 +603,7 @@ export class Sim {
       }
     } else if (enemy.bot) {
       this._addDamage(bot, enemy.bot, bot.damage); // v3.13: match stats
-      const died = enemy.bot.takeDamage(bot.damage);
+      const died = enemy.bot.takeDamage(bot.damage, bot.pos); // v3.16 Phase 3: shot reaction knows the shooter
       if (died) {
         this._addKill(bot, enemy.bot, false); // v3.13
         // v3.10: a carrier bot killed by a bot shot drops/transfers the bomb.

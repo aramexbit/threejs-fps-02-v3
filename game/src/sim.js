@@ -41,6 +41,8 @@ export class Sim {
     this.radioPerBot = new Map(); // bot name -> last line time
     this.defuseTime = 5; // 2.5 s with a defuse kit
     this.debugPlantHold = false; // shot mode: pretend F is held for the plant shot
+    this.lastImpactMat = null; // v3.16 Phase 2: material of the last bullet impact
+    this.lastImpactPoint = null;
     // v3.13: attack/defence ALTERNATES by round. Odd rounds Solara attacks
     // (the player carries the bomb and plants — item 1); even rounds
     // Bastion attacks (a Bastion bot carries and plants, the player +
@@ -527,14 +529,28 @@ export class Sim {
         }
       }
     } else {
-      // Impact: snow puff + decal, plus a spark burst on hard walls only
-      // (Gemini realism pass — sparks on snow would read wrong).
+      // v3.16 Phase 2: impact differs per surface material (the collider
+      // carries it — see map.js). Snow puffs white, metal sparks bright,
+      // concrete dusts grey, wood chips brown, sand puffs tan, rock chips.
+      const mat = best.kind === 'ground' ? 'snow' : (best.collider.mat || 'concrete');
+      const IMPACT = {
+        snow: { color: [0.92, 0.94, 0.96], n: 8, speed: 2, life: 0.7, sparks: false },
+        metal: { color: [1, 0.9, 0.5], n: 12, speed: 6, life: 0.2, sparks: true },
+        concrete: { color: [0.75, 0.73, 0.7], n: 10, speed: 3, life: 0.6, sparks: false },
+        wood: { color: [0.55, 0.38, 0.2], n: 10, speed: 3.5, life: 0.6, sparks: false },
+        sand: { color: [0.8, 0.7, 0.5], n: 10, speed: 2.5, life: 0.8, sparks: false },
+        rock: { color: [0.6, 0.6, 0.62], n: 10, speed: 4, life: 0.4, sparks: true },
+      };
+      const im = IMPACT[mat] || IMPACT.concrete;
       const normal = best.kind === 'ground'
         ? new THREE.Vector3(0, 1, 0)
         : new THREE.Vector3(-dir.x, 0, -dir.z).normalize();
-      this.fx.particles.burst(point, 8, 2, 0.7, [0.92, 0.94, 0.96], 0.6, -5);
-      if (best.kind === 'wall') this.fx.particles.burst(point, 12, 6, 0.2, [1, 0.9, 0.5], 1.2, -8);
+      this.fx.particles.burst(point, im.n, im.speed, im.life, im.color, 0.6, -5);
+      if (im.sparks) this.fx.particles.burst(point, 8, 7, 0.15, [1, 0.85, 0.4], 1.2, -8);
       this.fx.decals.add(point, normal);
+      this.audio.impact(mat);
+      this.lastImpactMat = mat;
+      this.lastImpactPoint = point.clone();
     }
   }
   onBotShot(bot, enemy, hit, dist) {
@@ -542,6 +558,8 @@ export class Sim {
     const mp = bot.eye.clone();
     this.fx.flash.fire(mp);
     this.fx.particles.smoke(mp, 1, 0.1, 0.3, 0.8);
+    // v3.16 Phase 2: bots eject casings too (same pool as the player).
+    if (this.fx.casings) this.fx.casings.eject(mp, bot.yaw || 0, this.rng);
     if (!hit) {
       const near = enemy.pos.clone();
       near.x += (this.rng() - 0.5) * 1.5;
@@ -725,9 +743,11 @@ export class Sim {
     // v3.10: queued clicks from freeze/end/matchEnd never fire later.
     if (this.phase !== 'round' && input.clickQueue) input.clickQueue = 0;
     if (this.phase === 'round' && p.alive) {
-      // v3.10: fire on the held button OR one queued quick click (see
-      // input.js — a click shorter than one sim step used to vanish).
-      if (input.mouseDown || (input.consumeClick && input.consumeClick())) {
+      // v3.16 Phase 2: semi-auto weapons (P9, Longbow) fire ONLY on a fresh
+      // click — holding the button used to re-fire them at full rpm.
+      const w = p.weapon;
+      const wantFire = w.def.auto ? (input.mouseDown || input.consumeClick()) : input.consumeClick();
+      if (wantFire) {
         const shot = p.tryFire(this.time, this.rng);
         if (shot) {
           this.resolveShot(shot);
@@ -759,6 +779,10 @@ export class Sim {
     if ((this.phase === 'freeze' || this.phase === 'round') && p.alive) {
       const wheel = input.consumeWheel();
       if (wheel !== 0) p.equip((p.slot + (wheel > 0 ? 1 : -1) + p.slots.length) % p.slots.length);
+      // v3.16 Phase 2: weapon inspection (T) — cosmetic, 1.4 s.
+      if (input.consume('KeyT') && p.startInspect()) {
+        this.events.push({ type: 'status', text: p.weapon.def.name + ' — INSPECT', dur: 1.2 });
+      }
     }
     // Recoil decay.
     p.recoil = Math.max(0, p.recoil - dt * 0.05);

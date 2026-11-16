@@ -226,7 +226,7 @@ export class HUD {
         <div class="team-card team-bas"><b>BASTION</b><span>DEFEND / ATTACK</span></div>
       </div>
       <p class="controls">WASD move · Mouse aim · Click fire · R reload · Shift sprint · Space jump<br>
-      Ctrl crouch · Right-click aim · B buy · F plant / defuse (hold) · G grenade · 4 cycle grenade · Q/E lean · wheel switch weapon · H help · Esc settings</p>
+      Ctrl crouch · Right-click aim · B buy · F plant / defuse (hold) · G grenade · 4 cycle grenade · Q/E lean · wheel switch weapon · T inspect · H help · Esc settings</p>
       <p class="diff-line">Difficulty: <b class="start-diff">NORMAL</b> · change in Settings (Esc)</p>
       <p class="cta">CLICK TO PLAY</p>`;
     this.startDiff = this.startOverlay.querySelector('.start-diff');

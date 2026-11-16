@@ -88,7 +88,18 @@ export class Player {
     this.throwAnim = null;
     this._savedVm = null; // {group, muzzle, vmBase, reloadMag}
     this._grenadeGroup = null;
+    // v3.16 Phase 4b: the viewmodel's parent — the world camera until
+    // main.js hands it the viewmodel camera via setVmCamera().
+    this._vmParent = this.camera;
     this.equip(0);
+  }
+  // v3.16 Phase 4b: reparent the viewmodel (and the grenade group, if it is
+  // the visible one) from the world camera to the viewmodel camera. The
+  // viewmodel's local pose is unchanged — only its parent changes.
+  setVmCamera(cam) {
+    const old = this._vmParent;
+    this._vmParent = cam;
+    if (this.viewmodel && this.viewmodel.parent === old) { old.remove(this.viewmodel); cam.add(this.viewmodel); }
   }
   // v3.7: swap the AR-77 viewmodel to the CC0 GLB rifle once it loads.
   // If the player is holding the AR-77, re-equip so the swap shows at once;
@@ -104,7 +115,7 @@ export class Player {
     if (index < 0 || index >= this.slots.length) return;
     this.inspectT = 0; // v3.16 Phase 2: switching cancels the inspection
     this.slot = index;
-    if (this.viewmodel) this.camera.remove(this.viewmodel);
+    if (this.viewmodel) this._vmParent.remove(this.viewmodel);
     // v3.7: the AR-77 uses the CC0 SCAR-L GLB once loaded (cloned per
     // equip; geometries/materials are shared). Other weapons and the
     // pre-load AR-77 keep the primitive viewmodel.
@@ -158,12 +169,22 @@ export class Player {
     // players read it as "no reload animation except the pistol". Each
     // weapon now has its own well position, a bigger dip/tilt, and the mag
     // drops OUT to the side (silhouetted, not buried in the receiver).
+    // v3.16 Phase 4b: poses pushed BACK from the camera (z) and raised
+    // (y) so the GRIP hand is actually on screen. The hands-diag probe
+    // (16 Nov) measured the grip hand at NDC y -1.04..-1.43 — BELOW the
+    // frame — on every weapon: the grip sits ~0.36 m below the eye but only
+    // ~0.38 m ahead, a ~47 deg angle at FOV 74. Pushing z back deepens the
+    // grip to ~0.55 m (angle ~30 deg, NDC ~-0.8) and the y raise brings the
+    // hand's centre up to NDC ~-0.7 so most of the hand (not just its top
+    // third) is visible. ADS y is kept EXACTLY where it was (the sight must
+    // stay on the crosshair): every adsLift drops by the same amount the
+    // pose rose (longbow 0.15 -> 0.07, others 0 -> -0.08).
     const pose = {
-      p9: { s: 1.3, x: 0.27, y: -0.25, z: -0.50, ry: 0.06, dip: 0.12, tilt: 0.55, mag: { x: 0, y: -0.10, z: 0.05 } },
-      vex9: { s: 1.4, x: 0.29, y: -0.26, z: -0.55, ry: 0.10, dip: 0.14, tilt: 0.60, mag: { x: 0, y: -0.12, z: -0.10 } },
-      ar77: { s: 1.4, x: 0.30, y: -0.27, z: -0.55, ry: 0.12, dip: 0.16, tilt: 0.65, mag: { x: 0, y: -0.13, z: 0.06 } },
-      longbow: { s: 1.2, x: 0.30, y: -0.27, z: -0.62, ry: 0.10, adsLift: 0.15, dip: 0.18, tilt: 0.70, mag: { x: 0, y: -0.11, z: -0.04 } }, // v3.7 fix: stock rear was at z=-0.02 (inside the 0.1 near plane) so the stock clipped into a giant slab; s 1.2 / z -0.62 puts the rear at -0.164. adsLift aligns the scope (local y 0.055 x 1.2 = 0.066) with the crosshair in ADS — without it the scope sat ~0.15 below the sight line and the stock bulk filled the lower screen.
-      he: { s: 1.3, x: 0.26, y: -0.25, z: -0.48, ry: 0.05, dip: 0, tilt: 0, mag: { x: 0, y: 0, z: 0 } },
+      p9: { s: 1.3, x: 0.27, y: -0.17, z: -0.60, ry: 0.06, adsLift: -0.08, dip: 0.12, tilt: 0.55, mag: { x: 0, y: -0.10, z: 0.05 } },
+      vex9: { s: 1.4, x: 0.29, y: -0.18, z: -0.68, ry: 0.10, adsLift: -0.08, dip: 0.14, tilt: 0.60, mag: { x: 0, y: -0.12, z: -0.10 } },
+      ar77: { s: 1.4, x: 0.30, y: -0.19, z: -0.73, ry: 0.12, adsLift: -0.08, dip: 0.16, tilt: 0.65, mag: { x: 0, y: -0.13, z: 0.06 } },
+      longbow: { s: 1.2, x: 0.30, y: -0.19, z: -0.70, ry: 0.10, adsLift: 0.07, dip: 0.18, tilt: 0.70, mag: { x: 0, y: -0.11, z: -0.04 } }, // v3.7 fix: stock rear was at z=-0.02 (inside the 0.1 near plane) so the stock clipped into a giant slab; s 1.2 / z -0.62 puts the rear at -0.164. adsLift aligns the scope (local y 0.055 x 1.2 = 0.066) with the crosshair in ADS — without it the scope sat ~0.15 below the sight line and the stock bulk filled the lower screen.
+      he: { s: 1.3, x: 0.26, y: -0.17, z: -0.55, ry: 0.05, dip: 0, tilt: 0, mag: { x: 0, y: 0, z: 0 } },
     }[this.slots[index].def.id] || { s: 1.3, x: 0.26, y: -0.24, z: -0.45, ry: 0, dip: 0.12, tilt: 0.55, mag: { x: 0, y: -0.13, z: 0.06 } };
     this.vmBase = pose;
     this._reloadDip = pose.dip;
@@ -172,7 +193,7 @@ export class Player {
     group.scale.setScalar(pose.s);
     group.rotation.y = pose.ry;
     group.position.set(pose.x, pose.y, pose.z);
-    this.camera.add(group);
+    this._vmParent.add(group);
   }
   buy(id) {
     // NOTE (v3.10): no phase check here on purpose. Buying is gated at the
@@ -568,15 +589,16 @@ export class Player {
     this._savedVm = { group: this.viewmodel, muzzle: this.muzzle, vmBase: this.vmBase, reloadMag: this._reloadMag };
     const { group, muzzle } = buildViewmodel('he');
     this._grenadeGroup = group;
-    if (this.viewmodel) this.camera.remove(this.viewmodel);
+    if (this.viewmodel) this._vmParent.remove(this.viewmodel);
     group.scale.setScalar(1.3);
     group.rotation.y = 0.05;
-    group.position.set(0.26, -0.25, -0.48);
+    // v3.16 Phase 4b: same push-back as the weapon poses (grip hand on screen).
+    group.position.set(0.26, -0.17, -0.55);
     this.viewmodel = group;
     this.muzzle = muzzle;
-    this.vmBase = { x: 0.26, y: -0.25, z: -0.48, ry: 0.05 };
+    this.vmBase = { x: 0.26, y: -0.17, z: -0.55, ry: 0.05 };
     this._reloadMag = null;
-    this.camera.add(group);
+    this._vmParent.add(group);
   }
   _restoreWeaponVm() {
     const s = this._savedVm;
@@ -588,13 +610,13 @@ export class Player {
     // the player equipped another weapon mid-throw, that weapon is already
     // showing and must not be replaced by the stale saved group.
     if (this.viewmodel !== g) return;
-    this.camera.remove(this.viewmodel);
+    this._vmParent.remove(this.viewmodel);
     this.viewmodel = s.group;
     this.muzzle = s.muzzle;
     this.vmBase = s.vmBase;
     this._reloadMag = s.reloadMag;
     this.viewmodel.visible = true;
-    this.camera.add(this.viewmodel);
+    this._vmParent.add(this.viewmodel);
   }
   _detonateGrenade(g) {
     const p = g.pos.clone();

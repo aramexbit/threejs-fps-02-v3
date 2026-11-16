@@ -163,6 +163,31 @@ export class HUD {
     Object.assign(scopeH.style, { position: 'absolute', left: '50%', top: '50%', width: '62vmin', height: '2px', transform: 'translate(-50%,-50%)', background: 'rgba(0,0,0,0.85)' });
     const scopeV = el('div', '', this.scopeOverlay);
     Object.assign(scopeV.style, { position: 'absolute', left: '50%', top: '50%', width: '2px', height: '62vmin', transform: 'translate(-50%,-50%)', background: 'rgba(0,0,0,0.85)' });
+    // v3.16 Phase 4b: real reticle (CODM f-01/f-07 pattern) — the old overlay
+    // was a bare circle + plain cross. Red centre cross, horizontal mil-dots,
+    // vertical stadia with numbered T-marks (3/4/5) below the centre.
+    const crossH = el('div', '', this.scopeOverlay);
+    Object.assign(crossH.style, { position: 'absolute', left: '50%', top: '50%', width: '18px', height: '2px', transform: 'translate(-50%,-50%)', background: '#ff2a2a' });
+    const crossV = el('div', '', this.scopeOverlay);
+    Object.assign(crossV.style, { position: 'absolute', left: '50%', top: '50%', width: '2px', height: '18px', transform: 'translate(-50%,-50%)', background: '#ff2a2a' });
+    const mkDot = (dx, dy) => {
+      const d = el('div', '', this.scopeOverlay);
+      Object.assign(d.style, { position: 'absolute', left: `calc(50% + ${dx}vmin)`, top: `calc(50% + ${dy}vmin)`, width: '5px', height: '5px', borderRadius: '50%', transform: 'translate(-50%,-50%)', background: 'rgba(0,0,0,0.85)' });
+    };
+    [-20, -10, 10, 20].forEach((dx) => mkDot(dx, 0));
+    const mkT = (dy, w, label) => {
+      const t = el('div', '', this.scopeOverlay);
+      Object.assign(t.style, { position: 'absolute', left: '50%', top: `calc(50% + ${dy}vmin)`, width: `${w}px`, height: '2px', transform: 'translate(-50%,-50%)', background: 'rgba(0,0,0,0.85)' });
+      if (label) {
+        const n = el('div', '', this.scopeOverlay);
+        n.textContent = label;
+        Object.assign(n.style, { position: 'absolute', left: `calc(50% + ${w / 2 + 6}px)`, top: `calc(50% + ${dy}vmin)`, transform: 'translateY(-50%)', font: '700 11px monospace', color: 'rgba(0,0,0,0.85)' });
+      }
+    };
+    mkT(-10, 12);
+    mkT(10, 12, '3');
+    mkT(20, 16, '4');
+    mkT(30, 20, '5');
     const scopeLabel = el('div', '', this.scopeOverlay);
     Object.assign(scopeLabel.style, { position: 'absolute', left: '50%', bottom: '12%', transform: 'translateX(-50%)', color: 'rgba(255,255,255,0.75)', fontSize: '13px', fontWeight: '700', letterSpacing: '2px' });
     scopeLabel.textContent = 'LONGBOW-7 · 8×';

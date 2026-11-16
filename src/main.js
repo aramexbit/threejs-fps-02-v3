@@ -45,6 +45,22 @@ const camera = new THREE.PerspectiveCamera(74, innerWidth / innerHeight, 0.1, 60
 camera.rotation.order = 'YXZ';
 scene.add(camera);
 
+// v3.16 Phase 4b: separate viewmodel scene (SaltySkills pattern) — the
+// weapon + hands render in their own scene with their own camera and
+// lights, on top of the world (clearDepth in frame()), so the gun never
+// clips into walls and its lighting is independent of the world sun. The
+// vm camera's pose + FOV mirror the world camera every frame (see
+// frame()), so the viewmodel framing is unchanged from the camera-attached
+// version (the hand positions were tuned against FOV 74).
+const vmScene = new THREE.Scene();
+const vmCamera = new THREE.PerspectiveCamera(74, innerWidth / innerHeight, 0.01, 5);
+const vmKey = new THREE.DirectionalLight(0xfff2e0, 3.0);
+vmKey.position.set(0.6, 1.0, 0.9);
+vmScene.add(vmKey);
+vmScene.add(new THREE.AmbientLight(0xbfd0e0, 1.2));
+vmScene.add(vmCamera); // the camera must be IN the scene: its children
+// (the viewmodel) only get matrix updates via scene.updateMatrixWorld().
+
 // --- World -------------------------------------------------------------------
 const sky = createSky();
 scene.add(sky);
@@ -92,6 +108,7 @@ const input = new Input(canvas, (locked) => {
 });
 input.shotMode = !!SHOT;
 const player = new Player(scene, camera, map, audio, fx);
+player.setVmCamera(vmCamera); // v3.16 Phase 4b: viewmodel lives in vmScene
 const bots = [];
 const SOLARA_NAMES = ['Ash', 'Birch', 'Cinder', 'Ember'];
 const BASTION_NAMES = ['Frost', 'Glacier', 'Hail', 'Sleet', 'Storm'];
@@ -178,7 +195,7 @@ hud.onSettingsChange = (key) => {
   // sensitivity / fov / invertY are read live from the settings singleton.
 };
 // Debug/verification handle (read-only inspection for playtests).
-window.__game = { sim, player, bots, camera, settings, hud, input, map, renderer, scene };
+window.__game = { sim, player, bots, camera, settings, hud, input, map, renderer, scene, vmCamera, vmScene };
 
 // --- Post pass (vignette + grade), written from scratch ----------------------------
 // Renders the scene into a target, then a fullscreen triangle samples it.
@@ -460,21 +477,44 @@ function frame(now) {
     bombMesh.position.copy(sim.bombPos);
     bombLight.material.color.setHex(Math.sin(t * 6) > 0 ? 0xff2f2f : 0x550000);
   } else bombMesh.visible = false;
+  // v3.16 Phase 4b: viewmodel camera — mirrors the world camera's pose and
+  // FOV every frame so the viewmodel framing is identical to before (the
+  // hands were tuned against FOV 74). The vm scene renders into the same
+  // target right after the world, with clearDepth, so the gun always draws
+  // on top and can never clip into world geometry.
+  vmCamera.position.copy(camera.position);
+  vmCamera.quaternion.copy(camera.quaternion);
+  if (Math.abs(vmCamera.fov - camera.fov) > 0.01) { vmCamera.fov = camera.fov; vmCamera.updateProjectionMatrix(); }
+  // v3.16 Phase 4b: render the viewmodel scene into the same target WITHOUT
+  // clearing it — WebGLRenderer.render() auto-clears color by default, and
+  // the first 4b probe run proved it wipes the world image to black (the
+  // world was gone, the reticle unreadable). clearDepth() alone is enough:
+  // the vm gun draws on top of the world.
+  const renderVm = () => {
+    const ac = renderer.autoClear;
+    renderer.autoClear = false;
+    renderer.clearDepth();
+    renderer.render(vmScene, vmCamera);
+    renderer.autoClear = ac;
+  };
   // Render (post pass, with direct fallback).
   try {
     if (postOK) {
       if (postMat) postMat.uniforms.uTime.value = t;
       renderer.setRenderTarget(rt);
       renderer.render(scene, camera);
+      renderVm();
       renderer.setRenderTarget(null);
       renderer.render(postScene, postCam);
     } else {
       renderer.render(scene, camera);
+      renderVm();
     }
   } catch {
     postOK = false;
     renderer.setRenderTarget(null);
     renderer.render(scene, camera);
+    renderVm();
   }
   hud.update(dt, bots, sim.events);
   // v3.15 (item C): distance culling for the grass clusters (map.updateLOD,
@@ -506,6 +546,8 @@ function frame(now) {
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
+  vmCamera.aspect = innerWidth / innerHeight; // v3.16 Phase 4b
+  vmCamera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
   if (rt) rt.setSize(innerWidth, innerHeight);
 });

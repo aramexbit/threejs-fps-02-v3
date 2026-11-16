@@ -92,9 +92,14 @@ function mats() {
     fde: new THREE.MeshStandardMaterial({ color: 0x6b5a44, roughness: 0.8, metalness: 0.05 }), // flat dark earth furniture
     wornDark: new THREE.MeshStandardMaterial({ color: 0x2a2e33, roughness: 0.6, metalness: 0.6 }), // worn / oiled steel
     wood: new THREE.MeshStandardMaterial({ color: 0x5a4028, roughness: 0.8, metalness: 0.0 }),
-    glove: new THREE.MeshStandardMaterial({ color: 0x54483a, roughness: 0.95, metalness: 0.0 }),
-    gloveCuff: new THREE.MeshStandardMaterial({ color: 0x6a5f4c, roughness: 0.95, metalness: 0.0 }),
+    glove: new THREE.MeshStandardMaterial({ color: 0x6b5a44, roughness: 0.95, metalness: 0.0 }), // v3.16 Phase 4b: lighter tan (was 0x54483a — the old hand was one flat dark brown and vanished against the gunmetal)
+    gloveCuff: new THREE.MeshStandardMaterial({ color: 0x8a7a5e, roughness: 0.95, metalness: 0.0 }), // v3.16 Phase 4b: light tan cuff + knuckle strip, catches the sun
+    gloveKnuckle: new THREE.MeshStandardMaterial({ color: 0x9a8a68, roughness: 0.9, metalness: 0.0 }), // v3.16 Phase 4b: knuckle bumps
+    sleeve: new THREE.MeshStandardMaterial({ color: 0x2e3138, roughness: 0.95, metalness: 0.0 }), // v3.16 Phase 4b: dark forearm sleeve
+    sleeveBand: new THREE.MeshStandardMaterial({ color: 0x8f1d16, roughness: 0.6, metalness: 0.2 }), // v3.16 Phase 4b: dark-red Solara cuff band (bright red read as a floating block)
     glass: new THREE.MeshStandardMaterial({ color: 0x9fc4d8, roughness: 0.1, metalness: 0.4, emissive: 0x2a4a5c, transparent: true, opacity: 0.65 }), // v3.2: glass reads (was emissive 0x1a2c38, opacity 0.5)
+    accentTeal: new THREE.MeshStandardMaterial({ color: 0x2fa8a0, roughness: 0.5, metalness: 0.5 }), // v3.16 Phase 4b: Vex-9 accent strip
+    accentGold: new THREE.MeshStandardMaterial({ color: 0xc9a227, roughness: 0.35, metalness: 0.9 }), // v3.16 Phase 4b: Longbow scope ring
     reticle: new THREE.MeshBasicMaterial({ color: 0xff2222 }),
   };
   return _mats;
@@ -130,18 +135,48 @@ function cyl(rt, rb, h, mat, x, y, z, rx = Math.PI / 2, seg = 12) {
   return m;
 }
 
-// A simple gloved hand: palm + curled fingers + cuff, gripping at (x,y,z)
-// with the fingers wrapped around a grip. `tilt` rotates the grip angle.
-// Exported for models.js: the GLB rifle gets the same hands as the primitives.
-export function glovedHand(x, y, z, tilt = 0.25) {
+// A READABLE gloved hand (v3.16 Phase 4b rewrite): the old hand (palm
+// 0.075, one flat dark brown, buried in the grip, no arm) was invisible in
+// screenshots — the user correctly said "tangannya tidak ada". The new hand
+// is bigger, its fingers + thumb sit PROUD of the grip on the camera side,
+// the knuckles carry a light strip that catches the sun, and a SLEEVE runs
+// from the wrist down toward the bottom of the frame (the CODM read: a
+// forearm entering the frame is what makes a gun look held, not floating).
+// `side` = +1 grip hand (sleeve down-right), -1 support hand (mirrored).
+// Named 'vm-hand' so probes can find it; the sleeve is 'vm-sleeve'.
+export function glovedHand(x, y, z, tilt = 0.25, side = 1) {
   const M = mats();
   const hand = new THREE.Group();
+  hand.name = 'vm-hand';
   hand.position.set(x, y, z);
   hand.rotation.x = tilt;
-  hand.add(box(0.075, 0.05, 0.11, M.glove, 0, 0, 0)); // palm
-  hand.add(box(0.07, 0.045, 0.05, M.glove, 0, -0.008, -0.07)); // fingers curled
-  hand.add(box(0.02, 0.04, 0.05, M.glove, 0.045, 0.005, -0.03)); // thumb
-  hand.add(box(0.085, 0.06, 0.05, M.gloveCuff, 0, 0.005, 0.075)); // cuff
+  // Palm — wider than the grip so it reads on both sides of it.
+  hand.add(box(0.10, 0.065, 0.13, M.glove, 0, 0, 0));
+  // Curled fingers under the grip front + 3 knuckle bumps on the
+  // camera-facing side (they catch the light and read as fingers).
+  hand.add(box(0.095, 0.05, 0.06, M.glove, 0, -0.012, -0.075));
+  for (let i = -1; i <= 1; i++) hand.add(box(0.024, 0.03, 0.03, M.gloveKnuckle, i * 0.032, 0.028, -0.055));
+  // Thumb — on the outer (camera) side of the grip, angled across it.
+  const thumb = box(0.026, 0.055, 0.07, M.glove, side * 0.052, 0.008, -0.02);
+  thumb.rotation.z = side * -0.5; thumb.rotation.x = -0.3;
+  hand.add(thumb);
+  // Knuckle strip — light tan, catches the sun (the old hand was one flat brown).
+  hand.add(box(0.10, 0.012, 0.05, M.gloveCuff, 0, 0.036, -0.02));
+  // Cuff at the wrist.
+  hand.add(box(0.105, 0.07, 0.06, M.gloveCuff, 0, 0.002, 0.085));
+  // Sleeve: long axis along Z, rotated so it runs from the wrist DOWN and
+  // toward the camera — the forearm entering from the bottom of the frame.
+  // Kept short (0.30) so most of it is actually visible instead of hanging
+  // off the bottom edge as a detached red band.
+  const sleeve = box(0.13, 0.13, 0.30, M.sleeve, side * 0.05, -0.14, 0.09);
+  sleeve.rotation.x = 1.0; sleeve.rotation.z = side * 0.22;
+  sleeve.name = 'vm-sleeve';
+  hand.add(sleeve);
+  // Dark-red cuff band (Solara) where sleeve meets glove — muted so it
+  // reads as a cuff, not a floating red block.
+  const band = box(0.135, 0.135, 0.035, M.sleeveBand, side * 0.02, -0.05, 0.035);
+  band.rotation.x = 1.0; band.rotation.z = side * 0.22;
+  hand.add(band);
   return hand;
 }
 
@@ -180,6 +215,8 @@ export function buildViewmodel(id) {
     for (let i = 0; i < 5; i++) group.add(box(0.06, 0.052, 0.006, M.polymer, 0, 0, -i * 0.012));
     group.add(box(0.012, 0.018, 0.012, M.gunmetalLight, 0, 0.032, -0.19)); // front sight
     group.add(box(0.03, 0.012, 0.02, M.gunmetalLight, 0, 0.03, 0.02)); // rear sight
+    // v3.16 Phase 4b: orange grip band (P9 accent — matches the fiber dot).
+    group.add(box(0.054, 0.012, 0.078, new THREE.MeshBasicMaterial({ color: 0xff7a2f }), 0, -0.10, 0.045));
     // v3.16 Phase 2c: fiber-optic front dot (orange, catches the eye in ADS).
     group.add(box(0.006, 0.006, 0.004, new THREE.MeshBasicMaterial({ color: 0xff7a2f }), 0, 0.034, -0.195));
     group.add(cyl(0.012, 0.012, 0.03, M.gunmetal, 0, 0.005, -0.21)); // muzzle
@@ -201,8 +238,10 @@ export function buildViewmodel(id) {
     group.add(box(0.062, 0.005, 0.34, M.gunmetalLight, 0, -0.036, -0.05)); // bottom edge wear
     group.add(box(0.047, 0.008, 0.062, M.wornDark, 0, -0.06, -0.10)); // mag ribs
     group.add(box(0.047, 0.008, 0.062, M.wornDark, 0, -0.10, -0.10));
+    // v3.16 Phase 4b: teal accent strip on the receiver top (Vex-9 accent).
+    group.add(box(0.062, 0.006, 0.20, M.accentTeal, 0, 0.037, -0.05));
     group.add(glovedHand(0, -0.07, 0.10, 0.2));
-    group.add(glovedHand(0.01, -0.055, -0.16, 0.1)); // support hand on shroud
+    group.add(glovedHand(0.01, -0.055, -0.16, 0.1, -1)); // support hand on shroud
     muzzle.position.set(0, 0.005, -0.38);
   } else if (id === 'ar77') {
     group.add(box(0.062, 0.075, 0.36, M.gunmetal, 0, 0, -0.02)); // receiver
@@ -237,7 +276,7 @@ export function buildViewmodel(id) {
     group.add(box(0.035, 0.09, 0.04, M.polymer, 0, -0.075, -0.34, 0.15));
     group.add(box(0.012, 0.022, 0.012, M.gunmetalLight, 0, 0.045, -0.42)); // front post
     group.add(glovedHand(0, -0.07, 0.12, 0.2));
-    group.add(glovedHand(0.01, -0.06, -0.28, 0.08)); // support hand
+    group.add(glovedHand(0.01, -0.06, -0.28, 0.08, -1)); // support hand
     muzzle.position.set(0, 0.01, -0.62);
   } else if (id === 'longbow') {
     group.add(box(0.06, 0.08, 0.42, M.gunmetal, 0, 0, 0.0)); // receiver
@@ -245,6 +284,8 @@ export function buildViewmodel(id) {
     group.add(cyl(0.02, 0.02, 0.06, M.gunmetalLight, 0, 0.015, -0.76)); // muzzle brake
     group.add(cyl(0.028, 0.028, 0.16, M.gunmetal, 0, 0.055, -0.05, 0, 16)); // scope tube
     group.add(cyl(0.032, 0.032, 0.02, M.glass, 0, 0.055, -0.13, 0, 16)); // scope lens
+    // v3.16 Phase 4b: gold ring on the scope tube (Longbow accent).
+    group.add(cyl(0.031, 0.031, 0.014, M.accentGold, 0, 0.055, -0.10, 0, 16));
     // v3.16 Phase 2c: scope turrets + bigger bolt + cheek rest + edge wear.
     group.add(cyl(0.012, 0.012, 0.02, M.gunmetalLight, 0, 0.09, -0.05, 0, 10)); // elevation turret
     group.add(cyl(0.012, 0.012, 0.02, M.gunmetalLight, 0.028, 0.055, -0.05, 0, 10)); // windage turret
@@ -256,7 +297,7 @@ export function buildViewmodel(id) {
     group.add(box(0.055, 0.08, 0.2, M.wood, 0, -0.01, 0.28)); // wooden stock
     group.add(cyl(0.008, 0.008, 0.07, M.gunmetalLight, 0.045, -0.01, 0.02, 0, 8)); // bolt
     group.add(glovedHand(0, -0.07, 0.14, 0.2));
-    group.add(glovedHand(0.01, -0.055, -0.30, 0.06));
+    group.add(glovedHand(0.01, -0.055, -0.30, 0.06, -1));
     muzzle.position.set(0, 0.015, -0.79);
   } else {
     // HE grenade: a dark green ovoid with pin + lever, held in a gloved hand.

@@ -351,6 +351,10 @@ export function buildMap(scene) {
   }
 
   // --- Bare trees (trunk + naked branches + a few orange leaves) ---------------
+  // v3.15: groups are recorded in treeGroups so _applyLOD() (below) can
+  // wrap them in THREE.LOD — full branches near, one trunk + one leaf
+  // blob far. Silhouette unchanged up close.
+  const treeGroups = [];
   const tree = (x, z, s = 1) => {
     const rnd = mulberry32(Math.round(x * 10 + z));
     const g = new THREE.Group();
@@ -373,6 +377,7 @@ export function buildMap(scene) {
       g.add(leaf);
     }
     group.add(g);
+    treeGroups.push(g);
     addCollider(x, z, 0.3, 0.3, 3.2);
   };
   tree(-18, -14, 1.2); tree(-16, 14, 1); tree(18, -15, 1.1);
@@ -550,6 +555,23 @@ export function buildMap(scene) {
   barrelCluster([[8, 7.0]], 3407); // v3.5: burn barrel north face of container (8,10) — hugs its collider, no lane cut
 
   // --- Dry grass tufts poking through the snow (non-collidable) ------------------
+  // v3.15: tufts are grouped into 8 regions (4 columns x 2 rows). The
+  // region group sits at the origin, so each tuft keeps its absolute
+  // position; updateLOD() hides whole regions farther than 26 m from the
+  // player — 140 tufts x 3 blades = 420 meshes only render near the
+  // player, which is where grass is visible anyway (fog + size).
+  const grassRegions = [];
+  const grassRegionFor = (x, z) => {
+    const col = x < -10.5 ? 0 : x < 0 ? 1 : x < 10.5 ? 2 : 3;
+    const row = z < 0 ? 0 : 1;
+    const idx = row * 4 + col;
+    if (!grassRegions[idx]) {
+      const g = new THREE.Group();
+      group.add(g);
+      grassRegions[idx] = { group: g, sx: 0, sz: 0, n: 0, cx: 0, cz: 0 };
+    }
+    return grassRegions[idx];
+  };
   const rnd = mulberry32(2024);
   const grassGeo = new THREE.PlaneGeometry(0.2, 0.45); // v3.2: narrower + taller blades, less cardboard (was 0.34 x 0.3)
   for (let i = 0; i < 140; i++) { // Gemini realism pass: doubled tufts + rubble pebbles (was 70)
@@ -569,7 +591,13 @@ export function buildMap(scene) {
       tuft.add(blade);
     }
     tuft.position.set(x, 0, z);
-    group.add(tuft);
+    const region = grassRegionFor(x, z);
+    region.group.add(tuft);
+    region.sx += x; region.sz += z; region.n++;
+  }
+  for (const r of grassRegions) {
+    if (!r) continue;
+    r.cx = r.sx / r.n; r.cz = r.sz / r.n;
   }
 
   // --- Floodlight poles -----------------------------------------------------------
@@ -682,8 +710,54 @@ export function buildMap(scene) {
     }
   }
 
+  // --- v3.15: LOD for pines + bare trees --------------------------------------
+  // Each full-detail group becomes level 0 of a THREE.LOD; level 1 is one
+  // trunk + one cone/blob (6 segments), shown past 55 m. The renderer
+  // switches levels itself (LOD.update is called by WebGLRenderer). The
+  // LOD inherits the group's position/rotation, so upgradePines() — which
+  // clears the group's children and adds the GLB — keeps working: the GLB
+  // is the near level, the cone stays the far level.
+  const lodWrap = (obj, farObj, dist) => {
+    const lod = new THREE.LOD();
+    lod.addLevel(obj, 0);
+    lod.addLevel(farObj, dist);
+    lod.position.copy(obj.position);
+    lod.rotation.copy(obj.rotation);
+    obj.position.set(0, 0, 0);
+    obj.rotation.set(0, 0, 0);
+    group.remove(obj);
+    group.add(lod);
+    return lod;
+  };
+  for (const { g, s } of pineGroups) {
+    const far = new THREE.Group();
+    far.add(cylAt(barkMat, 0.12 * s, 0.2 * s, 1.6 * s, 0, 0.8 * s, 0, 5));
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(1.5 * s, 4.6 * s, 6), pineMat);
+    cone.position.y = 3.0 * s;
+    cone.castShadow = true;
+    far.add(cone);
+    lodWrap(g, far, 55);
+  }
+  for (const g of treeGroups) {
+    const far = new THREE.Group();
+    far.add(cylAt(barkMat, 0.18, 0.28, 3.2, 0, 1.6, 0, 5));
+    const blob = new THREE.Mesh(new THREE.IcosahedronGeometry(0.9, 0), leafMat);
+    blob.position.y = 3.0; blob.scale.y = 0.5; blob.castShadow = true;
+    far.add(blob);
+    lodWrap(g, far, 55);
+  }
+
   return {
     group, colliders, waypoints, sites: SITES, spawns: SPAWNS,
+    // v3.15: distance culling for grass regions (called from main.js every
+    // 15 frames). Regions farther than 26 m from the player are hidden.
+    updateLOD(playerPos) {
+      for (const r of grassRegions) {
+        if (!r) continue;
+        const d = Math.hypot(r.cx - playerPos.x, r.cz - playerPos.z);
+        r.group.visible = d < 26;
+      }
+    },
     bounds: { minX: -MAP.halfW, maxX: MAP.halfW, minZ: -MAP.halfH, maxZ: MAP.halfH },
     // v3.7: replace the cone pines with clones of the CC0 pine GLB.
     // The GLB is ~7.3 m tall; the cone pines top out at ~5.1*s, so scale

@@ -554,7 +554,9 @@ export class Sim {
       this._addDamage(bot, this.player, bot.damage); // v3.13: match stats
       const died = this.player.damage(bot.damage, 'torso');
       this.audio.hurt(); // v3.14 (item 3): every enemy hit on the player thuds
-      this.events.push({ type: 'damage', amount: bot.damage });
+      // v3.15: the damage event carries the shooter's position so the HUD
+      // can light the arc pointing at the attacker (damage-direction).
+      this.events.push({ type: 'damage', amount: bot.damage, from: { x: bot.pos.x, z: bot.pos.z } });
       if (died) {
         this.player.diedAt = this.time; // v3.14 (item 2): death cam clock
         this._addKill(bot, this.player, false); // v3.13

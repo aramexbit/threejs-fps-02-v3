@@ -2,82 +2,99 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <link rel="icon" href="data:,">
 <title>FROSTLINE — Ironworks Ridge</title>
 <style>
-  /* v3.11 UI PORT gaya OhMyGames (referensi: ohmygames-ui-reference.png +
-     mockup v39-ui): panel navy gelap rounded + blur, aksen merah SOLARA /
-     biru BASTION / emas. Semua class sama seperti sebelumnya — hanya
-     tampilan yang berubah, tidak ada info HUD yang dihilangkan. */
+  /* v3.15 HUD MILITARY TACTICAL (pengguna 16 Nov 10:08): panel abu-abu
+     gelap transparan, teks putih, aksen oranye — ganti tema navy + emas
+     OhMyGames. Semua class sama seperti sebelumnya (verify mengandalkan
+     .buy/.overlay/.feed-item/.chat-item/.pips-sol/.slot) — hanya tampilan
+     + posisi yang berubah, tidak ada info HUD yang dihilangkan. */
   :root {
-    --navy: rgba(9, 17, 30, .88);
-    --navy-2: rgba(13, 24, 42, .94);
-    --line: rgba(125, 155, 195, .35);
-    --ink: #eef2f6;
-    --muted: #9fb0c3;
+    --navy: rgba(20, 24, 28, .80);
+    --navy-2: rgba(26, 31, 36, .94);
+    --line: rgba(255, 255, 255, .16);
+    --ink: #f4f6f8;
+    --muted: #a7b0b8;
     --red: #e0352b;
     --red-bright: #ff4d42;
     --blue: #2f6fd8;
     --blue-bright: #4da3ff;
-    --gold: #ffd24a;
+    --gold: #ff7a2f;
     --orange: #ff7a2f;
+    --accent: #ff7a2f;
+    --panel: rgba(20, 24, 28, .80);
   }
   html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #0d1117; }
-  #game { display: block; width: 100vw; height: 100vh; }
+  #game { display: block; width: 100vw; height: 100vh; touch-action: none; }
   .hud { position: fixed; inset: 0; pointer-events: none; font-family: system-ui, sans-serif; color: var(--ink); }
   .hidden { display: none !important; }
-  /* Minimap */
-  .minimap-wrap { position: absolute; top: 14px; left: 14px; }
-  .minimap { width: 168px; height: 168px; border-radius: 50%; box-shadow: 0 0 0 3px #16233c, 0 4px 18px rgba(0,0,0,.5); background: #dfe6ec; }
-  /* HP / ARMOR / CASH panel — top-left, di kanan minimap (seperti mockup) */
-  .bl { position: absolute; left: 196px; top: 14px; width: 212px; background: var(--navy); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; box-shadow: 0 4px 18px rgba(0,0,0,.45); backdrop-filter: blur(6px); }
+  /* v3.15: transisi halus untuk semua panel HUD (opacity + transform). */
+  .bl, .br, .score, .timer, .feed-item, .chat-item, .banner, .statusmsg, .plantprompt, .buy, .help, .settings { transition: opacity .2s ease, transform .2s ease; }
+  /* Compass — top-centre, di atas score pill. Canvas 2D yang digambar
+     hud.js tiap frame dari yaw pemain + posisi site/musuh (bukan statis). */
+  .compass { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); }
+  .compass canvas { display: block; width: 340px; height: 34px; }
+  /* Minimap — v3.15 PINDAH ke kanan atas (tactical). */
+  .minimap-wrap { position: absolute; top: 14px; right: 14px; }
+  .minimap { width: 150px; height: 150px; border-radius: 50%; box-shadow: 0 0 0 3px rgba(255,122,47,.55), 0 4px 18px rgba(0,0,0,.5); background: #dfe6ec; }
+  /* HP / ARMOR / CASH panel — v3.15 PINDAH ke kiri bawah (tactical).
+     Angka HP besar + bar; aksen oranye; pulse merah saat HP rendah. */
+  .bl { position: absolute; left: 16px; bottom: 16px; width: 240px; background: var(--navy); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 10px; padding: 10px 12px; box-shadow: 0 4px 18px rgba(0,0,0,.45); backdrop-filter: blur(6px); }
+  .bl.lowhp { animation: lowhp 1s infinite; }
+  @keyframes lowhp { 0%, 100% { border-left-color: rgba(224,53,43,.5); } 50% { border-left-color: #e0352b; box-shadow: 0 0 18px rgba(224,53,43,.55); } }
   .hp-row, .armor-row, .money-row { display: flex; justify-content: space-between; align-items: baseline; font-size: 14px; font-weight: 800; }
   .row-label { letter-spacing: .04em; }
   .hp-label { color: #ff6b61; }
   .armor-label { color: #7fb3ff; }
   .cash-label { color: var(--gold); }
-  .hpbar { width: 100%; height: 10px; background: rgba(9,17,30,.7); border: 1px solid var(--line); border-radius: 999px; overflow: hidden; margin: 5px 0 7px; }
-  .hpfill { height: 100%; width: 100%; background: #6fc3d8; }
+  .hpbar { width: 100%; height: 10px; background: rgba(255,255,255,.12); border: 1px solid var(--line); border-radius: 999px; overflow: hidden; margin: 5px 0 7px; }
+  .hpfill { height: 100%; width: 100%; background: #f4f6f8; transition: width .18s ease, background .18s ease; }
   .hptext, .armor-val { color: var(--ink); }
   .money { color: var(--gold); }
-  /* Score bar — top-centre, satu pill navy: SOLARA n · ROUND n/9 · n BASTION */
-  .score { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: flex; gap: 12px; align-items: center; font-weight: 800; letter-spacing: .06em; background: var(--navy); border: 1px solid var(--line); border-radius: 10px; padding: 7px 16px; box-shadow: 0 4px 18px rgba(0,0,0,.45); backdrop-filter: blur(6px); white-space: nowrap; }
+  /* Score bar — top-centre, di bawah compass. */
+  .score { position: absolute; top: 48px; left: 50%; transform: translateX(-50%); display: flex; gap: 12px; align-items: center; font-weight: 800; letter-spacing: .06em; background: var(--navy); border: 1px solid var(--line); border-radius: 10px; padding: 7px 16px; box-shadow: 0 4px 18px rgba(0,0,0,.45); backdrop-filter: blur(6px); white-space: nowrap; }
   .score-sol { color: var(--red-bright); font-size: 15px; }
   .score-bas { color: var(--blue-bright); font-size: 15px; }
   .score-mid { color: var(--ink); font-size: 12px; opacity: .85; letter-spacing: .1em; }
-  .timer { position: absolute; top: 58px; left: 50%; transform: translateX(-50%); font-size: 28px; font-weight: 900; background: var(--navy); border: 1px solid var(--line); border-radius: 10px; padding: 2px 16px; box-shadow: 0 4px 18px rgba(0,0,0,.45); }
+  .timer { position: absolute; top: 94px; left: 50%; transform: translateX(-50%); font-size: 28px; font-weight: 900; background: var(--navy); border: 1px solid var(--line); border-radius: 10px; padding: 2px 16px; box-shadow: 0 4px 18px rgba(0,0,0,.45); }
   .timer.urgent { color: #ff5a4e; border-color: rgba(255,90,78,.7); }
-  /* Objective pill di bawah timer */
-  .bomb-status { position: absolute; top: 106px; left: 50%; transform: translateX(-50%); font-size: 13px; font-weight: 800; letter-spacing: .05em; color: var(--gold); background: rgba(9,17,30,.85); border: 1px solid rgba(255,210,74,.5); border-radius: 999px; padding: 5px 14px; white-space: nowrap; }
+  /* Mission objective — v3.15 PINDAH ke kiri atas: kartu objektif dengan
+     label MISSION, bukan lagi pill emas di bawah timer. */
+  .bomb-status { position: absolute; top: 14px; left: 14px; max-width: 320px; font-size: 13px; font-weight: 800; letter-spacing: .05em; line-height: 1.45; color: var(--ink); background: var(--navy); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 10px; padding: 8px 12px; white-space: normal; }
+  .bomb-status::before { content: '◉ MISSION — '; color: var(--accent); }
   .bomb-status:empty { display: none; }
-  /* Team alive pips */
+  /* Team alive pips — di bawah timer. */
   .pips { position: absolute; top: 142px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 4px; align-items: center; }
   .pips-sol i, .pips-bas i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin: 0 2px; box-shadow: 0 1px 4px rgba(0,0,0,.7); }
   .pips-sol i { background: var(--red-bright); } .pips-bas i { background: var(--blue-bright); }
   .pips-sol i.dead, .pips-bas i.dead { background: #3a4450; opacity: .55; }
-  /* Kill feed — top-right, di bawah tombol gear */
-  .feed { position: absolute; top: 62px; right: 16px; text-align: right; font-size: 13px; font-weight: 600; }
-  .feed-item { background: var(--navy); border: 1px solid var(--line); border-right: 3px solid var(--red-bright); padding: 5px 10px; margin-bottom: 5px; border-radius: 8px; }
+  /* Kill feed — kanan atas, di bawah tombol gear/help (yang pindah ke
+     bawah minimap). */
+  .feed { position: absolute; top: 228px; right: 16px; text-align: right; font-size: 13px; font-weight: 600; }
+  .feed-item { background: var(--navy); border: 1px solid var(--line); border-right: 3px solid var(--red-bright); padding: 5px 10px; margin-bottom: 5px; border-radius: 8px; animation: feedIn .18s ease; }
+  @keyframes feedIn { from { opacity: 0; transform: translateX(12px); } }
   .feed-item.feed-hs { border-right-color: #ff2f2f; background: rgba(60,16,12,.85); }
   .feed-weapon { color: var(--gold); }
   .feed-hs-tag { color: #ff5a4e; font-weight: 800; }
-  /* Team chat / radio — bottom-left */
-  .chat { position: absolute; left: 16px; bottom: 16px; font-size: 13px; font-weight: 600; max-width: 430px; }
-  .chat-item { background: var(--navy); border: 1px solid var(--line); border-left: 3px solid var(--red-bright); padding: 5px 10px; margin-bottom: 4px; border-radius: 8px; }
+  /* Team chat / radio — kiri bawah, di atas panel HP. */
+  .chat { position: absolute; left: 16px; bottom: 148px; font-size: 13px; font-weight: 600; max-width: 430px; }
+  .chat-item { background: var(--navy); border: 1px solid var(--line); border-left: 3px solid var(--red-bright); padding: 5px 10px; margin-bottom: 4px; border-radius: 8px; animation: feedIn .18s ease; }
   .chat-item.chat-bas { border-left-color: var(--blue-bright); }
   /* Flashbang overlay */
   .flashfx { position: absolute; inset: 0; background: #fff; opacity: 0; transition: opacity 1.2s; pointer-events: none; }
   /* Banner */
   .banner { position: absolute; top: 30%; left: 50%; transform: translate(-50%, -50%); font-size: 30px; font-weight: 900; letter-spacing: .08em; text-align: center; text-shadow: 0 3px 14px rgba(0,0,0,.9); color: var(--gold); white-space: nowrap; }
-  /* v3.8 kill banners: HEADSHOT merah + multi-kill emas, ditumpuk di kanan
-     atas di bawah kill feed (seperti mockup) — bukan lagi di tengah bawah. */
-  .killbanner { position: absolute; top: 220px; right: 16px; font-size: 26px; font-weight: 900; font-style: italic; letter-spacing: .02em; color: #fff; background: linear-gradient(100deg, rgba(190,20,20,.92), rgba(120,8,8,.88)); border: 2px solid rgba(255,90,78,.9); border-radius: 8px; padding: 8px 14px; transform: skewX(-6deg); text-shadow: 0 2px 8px rgba(0,0,0,.8); box-shadow: 0 4px 18px rgba(0,0,0,.5); white-space: nowrap; }
+  /* v3.8 kill banners: HEADSHOT merah + multi-kill oranye, di kanan
+     bawah kill feed (feed kini di 228px, jadi banner turun ke ~400px). */
+  .killbanner { position: absolute; top: 400px; right: 16px; font-size: 26px; font-weight: 900; font-style: italic; letter-spacing: .02em; color: #fff; background: linear-gradient(100deg, rgba(190,20,20,.92), rgba(120,8,8,.88)); border: 2px solid rgba(255,90,78,.9); border-radius: 8px; padding: 8px 14px; transform: skewX(-6deg); text-shadow: 0 2px 8px rgba(0,0,0,.8); box-shadow: 0 4px 18px rgba(0,0,0,.5); white-space: nowrap; }
   .killbanner b { color: var(--gold); }
-  .multibanner { position: absolute; top: 280px; right: 16px; font-size: 24px; font-weight: 900; font-style: italic; letter-spacing: .04em; color: #fff; background: linear-gradient(100deg, rgba(176,120,10,.92), rgba(110,70,5,.88)); border: 2px solid rgba(255,210,74,.9); border-radius: 8px; padding: 8px 18px; transform: skewX(-6deg); text-shadow: 0 2px 8px rgba(0,0,0,.8); box-shadow: 0 4px 18px rgba(0,0,0,.5); white-space: nowrap; }
-  /* Crosshair */
+  .multibanner { position: absolute; top: 460px; right: 16px; font-size: 24px; font-weight: 900; font-style: italic; letter-spacing: .04em; color: #fff; background: linear-gradient(100deg, rgba(176,90,10,.92), rgba(110,50,5,.88)); border: 2px solid rgba(255,122,47,.9); border-radius: 8px; padding: 8px 18px; transform: skewX(-6deg); text-shadow: 0 2px 8px rgba(0,0,0,.8); box-shadow: 0 4px 18px rgba(0,0,0,.5); white-space: nowrap; }
+  /* Crosshair — titik oranye di tengah + 4 garis putih. */
   .cross { position: absolute; left: 50%; top: 50%; width: 0; height: 0; --sp: 8px; }
-  .cross i { position: absolute; background: rgba(238,242,246,.95); box-shadow: 0 0 3px #000; }
+  .cross::after { content: ''; position: absolute; left: -2px; top: -2px; width: 4px; height: 4px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 3px #000; }
+  .cross i { position: absolute; background: rgba(244,246,248,.95); box-shadow: 0 0 3px #000; }
   .cross i:nth-child(1) { left: calc(-1px + var(--sp) * -1); top: -8px; width: 2px; height: 8px; }
   .cross i:nth-child(2) { left: calc(-1px + var(--sp)); top: -8px; width: 2px; height: 8px; }
   .cross i:nth-child(3) { top: calc(-1px + var(--sp) * -1); left: -8px; height: 2px; width: 8px; }
@@ -90,20 +107,32 @@
   .hitmarker::before { transform: rotate(45deg); }
   .hitmarker::after { transform: rotate(-45deg); }
   .hitmarker.hs::before, .hitmarker.hs::after { background: #ff2f2f; }
+  /* v3.15: hit indicator arah damage — 4 segmen arc di sekitar crosshair.
+     Segmen yang menyala = arah datangnya tembakan (depan/kanan/belakang/
+     kiri relatif terhadap arah hadap pemain). Disetel hud.js dari event
+     damage (sim.js kirim posisi penembak). */
+  .dmgdir { position: absolute; left: 50%; top: 50%; width: 140px; height: 140px; margin: -70px 0 0 -70px; pointer-events: none; }
+  .dmg-arc { position: absolute; left: 50%; top: 50%; width: 46px; height: 9px; margin: -4px 0 0 -23px; border-radius: 6px; background: #ff3b30; box-shadow: 0 0 10px rgba(255,59,48,.9); opacity: 0; transition: opacity .5s ease; }
+  .dmg-n { transform: translateY(-62px); }
+  .dmg-e { transform: rotate(90deg) translateY(-62px); }
+  .dmg-s { transform: rotate(180deg) translateY(-62px); }
+  .dmg-w { transform: rotate(270deg) translateY(-62px); }
   /* Bottom-right ammo */
   .br { position: absolute; right: 20px; bottom: 14px; text-align: right; background: var(--navy); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; box-shadow: 0 4px 18px rgba(0,0,0,.45); backdrop-filter: blur(6px); }
   .slots { display: flex; gap: 5px; justify-content: flex-end; margin-bottom: 6px; }
-  .slot { font-size: 11px; font-weight: 800; color: var(--muted); background: rgba(9,17,30,.7); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
-  .slot-active { color: var(--gold); border-color: var(--gold); background: rgba(42,32,19,.85); }
+  .slot { font-size: 11px; font-weight: 800; color: var(--muted); background: rgba(255,255,255,.06); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+  .slot-active { color: var(--gold); border-color: var(--gold); background: rgba(255,122,47,.18); }
   .slot-empty { opacity: .45; }
   .slot-bomb { color: var(--gold); border-color: var(--gold); }
   .ammo { font-size: 46px; font-weight: 900; line-height: 1; text-shadow: 0 3px 10px rgba(0,0,0,.85); }
+  .ammo.bump { animation: ampop .15s ease; }
+  @keyframes ampop { 50% { transform: scale(1.12); } }
   .ammo span { font-size: 22px; color: var(--muted); }
   .wname { font-size: 14px; font-weight: 700; color: var(--muted); margin-top: 2px; }
   .grenades { font-size: 13px; font-weight: 700; color: var(--gold); margin-top: 2px; }
   /* Channel */
   .channel { position: absolute; left: 50%; bottom: 22%; transform: translateX(-50%); width: 300px; text-align: center; background: var(--navy); border: 1px solid var(--line); border-radius: 999px; padding: 8px 12px; }
-  .channelfill { height: 10px; background: linear-gradient(90deg, #ffb347, var(--gold)); border-radius: 999px; width: 0; }
+  .channelfill { height: 10px; background: linear-gradient(90deg, #ff9a4d, var(--gold)); border-radius: 999px; width: 0; }
   .channellabel { font-size: 13px; font-weight: 800; letter-spacing: .1em; margin-top: 5px; color: var(--gold); }
   .damagefx { position: absolute; inset: 0; box-shadow: inset 0 0 90px 30px rgba(224,60,50,.55); opacity: 0; transition: opacity .25s; }
   /* Buy menu */
@@ -113,14 +142,14 @@
   .buy-title { font-size: 22px; font-weight: 900; letter-spacing: .06em; color: var(--gold); margin-bottom: 4px; }
   .buy-money { font-size: 16px; font-weight: 800; color: var(--gold); margin-bottom: 10px; }
   .buy-squad { display: flex; gap: 6px; margin-bottom: 12px; }
-  .buy-mate { flex: 1; background: rgba(9,17,30,.8); border: 1px solid var(--line); border-left: 3px solid var(--red-bright); border-radius: 8px; padding: 7px 9px; min-width: 0; }
+  .buy-mate { flex: 1; background: rgba(255,255,255,.05); border: 1px solid var(--line); border-left: 3px solid var(--red-bright); border-radius: 8px; padding: 7px 9px; min-width: 0; }
   .buy-mate b { display: block; font-size: 12px; color: var(--ink); }
   .buy-mate span { font-size: 11px; color: var(--muted); }
   .buy-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; }
   .buy-col { min-width: 0; }
   .buy-section { font-size: 12px; font-weight: 900; letter-spacing: .14em; color: var(--gold); margin: 10px 0 6px; }
-  .buy-item { display: block; width: 100%; padding: 10px 12px; margin-bottom: 6px; background: #131e33; color: var(--ink); border: 1px solid var(--line); border-radius: 8px; font-size: 15px; font-weight: 700; cursor: pointer; text-align: left; transition: border-color .12s, background .12s; }
-  .buy-item:hover { border-color: var(--gold); background: #1a2742; }
+  .buy-item { display: block; width: 100%; padding: 10px 12px; margin-bottom: 6px; background: #232a30; color: var(--ink); border: 1px solid var(--line); border-radius: 8px; font-size: 15px; font-weight: 700; cursor: pointer; text-align: left; transition: border-color .12s, background .12s; }
+  .buy-item:hover { border-color: var(--gold); background: #2e363d; }
   .buy-item.buy-owned { opacity: .55; }
   .buy-card-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
   .buy-name { text-align: left; }
@@ -130,12 +159,13 @@
   .buy-hint { font-size: 12px; color: var(--muted); }
   /* Overlays */
   .overlay { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(6,10,18,.82), rgba(6,10,18,.9)); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; pointer-events: auto; }
-  /* v3.10: gear button, status line, settings panel, pause buttons */
-  .gearbtn { position: absolute; top: 14px; right: 16px; pointer-events: auto; background: var(--navy); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px 13px; font-size: 13px; font-weight: 800; cursor: pointer; letter-spacing: .04em; }
+  /* v3.10: gear button + help button — v3.15 di bawah minimap (kanan atas),
+     karena minimap pindah ke kanan atas. */
+  .gearbtn { position: absolute; top: 178px; right: 16px; pointer-events: auto; background: var(--navy); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px 13px; font-size: 13px; font-weight: 800; cursor: pointer; letter-spacing: .04em; }
   .gearbtn:hover { border-color: var(--gold); color: var(--gold); }
   /* v3.13: help button (next to gear), help panel, plant/defuse prompt,
      scoreboard, difficulty tag. */
-  .helpbtn { position: absolute; top: 14px; right: 138px; pointer-events: auto; background: var(--navy); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px 13px; font-size: 13px; font-weight: 800; cursor: pointer; letter-spacing: .04em; }
+  .helpbtn { position: absolute; top: 178px; right: 138px; pointer-events: auto; background: var(--navy); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px 13px; font-size: 13px; font-weight: 800; cursor: pointer; letter-spacing: .04em; }
   .helpbtn:hover { border-color: var(--gold); color: var(--gold); }
   .help { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 640px; max-width: 92vw; max-height: 86vh; overflow: auto; background: var(--navy-2); border: 1px solid var(--line); border-radius: 12px; padding: 22px 24px; pointer-events: auto; box-shadow: 0 12px 40px rgba(0,0,0,.6); z-index: 30; }
   .help-title { font-size: 20px; font-weight: 900; letter-spacing: .06em; color: var(--gold); margin-bottom: 12px; }
@@ -148,7 +178,7 @@
   .plantprompt { position: absolute; left: 50%; bottom: 30%; transform: translateX(-50%); font-size: 15px; font-weight: 800; letter-spacing: .05em; color: var(--gold); background: var(--navy); border: 1px solid rgba(255,210,74,.4); border-radius: 999px; padding: 7px 18px; white-space: nowrap; }
   .plantprompt-big { font-size: 24px; padding: 10px 24px; animation: pulse 1.2s infinite; border-color: var(--gold); box-shadow: 0 0 24px rgba(255,210,74,.35); }
   /* Difficulty tag under the top cluster. */
-  .difftag { position: absolute; top: 172px; left: 50%; transform: translateX(-50%); font-size: 11px; font-weight: 800; letter-spacing: .14em; color: var(--muted); background: rgba(9,17,30,.7); border: 1px solid var(--line); border-radius: 999px; padding: 3px 12px; white-space: nowrap; }
+  .difftag { position: absolute; top: 172px; left: 50%; transform: translateX(-50%); font-size: 11px; font-weight: 800; letter-spacing: .14em; color: var(--muted); background: rgba(255,255,255,.06); border: 1px solid var(--line); border-radius: 999px; padding: 3px 12px; white-space: nowrap; }
   .diff-line { font-size: 14px; color: var(--muted); margin: 8px 0 0; }
   .diff-line b { color: var(--gold); }
   /* Scoreboard (end of match). */
@@ -173,18 +203,18 @@
   .settings-slider { flex: 1.4; accent-color: var(--gold); }
   .settings-value { width: 52px; text-align: right; font-size: 13px; font-weight: 800; color: var(--gold); }
   .settings-check { width: 18px; height: 18px; accent-color: var(--gold); }
-  .settings-qbtn { padding: 6px 14px; background: #131e33; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; font-size: 13px; font-weight: 800; cursor: pointer; }
-  .settings-qbtn.q-active { border-color: var(--gold); background: #2a2013; color: var(--gold); }
+  .settings-qbtn { padding: 6px 14px; background: #232a30; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; font-size: 13px; font-weight: 800; cursor: pointer; }
+  .settings-qbtn.q-active { border-color: var(--gold); background: rgba(255,122,47,.18); color: var(--gold); }
   .settings-foot { font-size: 12px; color: var(--muted); margin-top: 4px; }
   .settings-close { display: block; margin: 16px auto 0; padding: 10px 28px; background: var(--gold); color: #0d1117; border: none; border-radius: 8px; font-size: 14px; font-weight: 900; letter-spacing: .06em; cursor: pointer; }
   .pause-btns { display: flex; gap: 12px; margin-top: 18px; }
-  .pause-btn { padding: 10px 22px; background: #131e33; color: var(--ink); border: 1px solid var(--line); border-radius: 8px; font-size: 15px; font-weight: 800; cursor: pointer; }
+  .pause-btn { padding: 10px 22px; background: #232a30; color: var(--ink); border: 1px solid var(--line); border-radius: 8px; font-size: 15px; font-weight: 800; cursor: pointer; }
   .pause-btn:hover { border-color: var(--gold); color: var(--gold); }
   .overlay h1 { font-size: 64px; letter-spacing: .14em; margin: 0; color: var(--ink); text-shadow: 0 4px 24px rgba(0,0,0,.8); }
   .overlay .sub { font-size: 17px; color: var(--gold); font-weight: 700; margin: 10px 0 4px; }
   .overlay .roster { font-size: 14px; color: var(--muted); font-weight: 600; margin: 6px 0 4px; }
   .overlay .controls { font-size: 14px; color: var(--muted); line-height: 1.7; }
-  .overlay .cta { font-size: 20px; font-weight: 900; letter-spacing: .12em; color: var(--blue-bright); animation: pulse 1.6s infinite; }
+  .overlay .cta { font-size: 20px; font-weight: 900; letter-spacing: .12em; color: var(--accent); animation: pulse 1.6s infinite; }
   /* Team cards on the start screen (desain pengguna: TERORIS merah vs
      POLISI biru) — visual only, pemain selalu SOLARA. */
   .teams { display: flex; gap: 12px; margin: 16px 0 6px; }
@@ -196,6 +226,61 @@
   .team-bas { background: linear-gradient(120deg, rgba(47,111,216,.30), rgba(47,111,216,.08)); border-color: rgba(77,163,255,.7); }
   .team-bas b { color: #6fb0ff; } .team-bas span { color: #bcd8ff; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
+  /* v3.15 — TOUCH UI (Android). Hanya tampil bila body.touch (touch.js
+     mendeteksi perangkat sentuh atau ?touch=1). Joystick analog kiri
+     bawah; tombol FIRE/AIM/RELOAD/JUMP/CROUCH + E (pasang/defuse) kanan
+     bawah; semuanya pointer-events:auto dan touch-action:none supaya
+     multitouch (joystick + look + fire) tidak saling mengganggu dan
+     browser tidak scroll/zoom. */
+  .touch-ui { display: none; }
+  body.touch .touch-ui { display: block; }
+  .stick-zone { position: fixed; left: 14px; bottom: 14px; width: 140px; height: 140px; border-radius: 50%; background: rgba(20,24,28,.45); border: 1.5px solid rgba(255,255,255,.30); pointer-events: auto; touch-action: none; z-index: 70; }
+  .stick-nub { position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%; background: rgba(255,122,47,.85); border: 2px solid rgba(255,255,255,.65); box-shadow: 0 2px 10px rgba(0,0,0,.5); }
+  .tbtn { position: fixed; border-radius: 50%; background: rgba(20,24,28,.55); border: 1.5px solid rgba(255,255,255,.35); color: #fff; font-weight: 900; display: flex; align-items: center; justify-content: center; pointer-events: auto; touch-action: none; z-index: 70; user-select: none; -webkit-user-select: none; font-family: system-ui, sans-serif; }
+  .tbtn.on, .tbtn:active { background: rgba(255,122,47,.85); border-color: #fff; }
+  .tbtn-fire { width: 84px; height: 84px; right: 16px; bottom: 16px; font-size: 15px; letter-spacing: .04em; }
+  .tbtn-aim { width: 56px; height: 56px; right: 32px; bottom: 116px; font-size: 12px; }
+  .tbtn-reload { width: 56px; height: 56px; right: 116px; bottom: 32px; font-size: 12px; }
+  .tbtn-jump { width: 56px; height: 56px; right: 116px; bottom: 116px; font-size: 12px; }
+  .tbtn-crouch { width: 56px; height: 56px; right: 196px; bottom: 32px; font-size: 11px; }
+  .tbtn-action { width: 56px; height: 56px; right: 196px; bottom: 116px; font-size: 16px; }
+  /* v3.15 — layout sentuh: panel HP pindah ke kanan joystick, panel senjata
+     naik di atas klaster tombol, minimap + tombol mengecil. */
+  body.touch .bl { left: 168px; bottom: 16px; width: 158px; padding: 8px 10px; font-size: 12px; }
+  body.touch .chat { left: 168px; bottom: 138px; max-width: 52vw; font-size: 11px; }
+  body.touch .br { right: 14px; bottom: 218px; padding: 8px 10px; }
+  body.touch .br .ammo { font-size: 30px; }
+  body.touch .minimap { width: 110px; height: 110px; }
+  body.touch .gearbtn { top: 138px; }
+  body.touch .helpbtn { top: 138px; }
+  body.touch .feed { top: 188px; font-size: 11px; }
+  body.touch .killbanner { top: 340px; font-size: 19px; }
+  body.touch .multibanner { top: 388px; font-size: 18px; }
+  body.touch .banner { font-size: 22px; }
+  body.touch .plantprompt { font-size: 12px; bottom: 38%; }
+  body.touch .plantprompt-big { font-size: 18px; }
+  body.touch .compass canvas { width: 260px; height: 26px; }
+  body.touch .bomb-status { max-width: 46vw; font-size: 11px; }
+  /* v3.15 — responsif PC: layar sempit mengecilkan HUD, tidak terpotong. */
+  @media (max-width: 900px) {
+    .minimap { width: 110px; height: 110px; }
+    .gearbtn { top: 138px; } .helpbtn { top: 138px; }
+    .feed { top: 188px; font-size: 11px; }
+    .killbanner { top: 340px; font-size: 19px; } .multibanner { top: 388px; font-size: 18px; }
+    .bl { width: 190px; }
+    .br .ammo { font-size: 34px; }
+    .banner { font-size: 22px; }
+    .buy-grid { grid-template-columns: 1fr 1fr; }
+    .compass canvas { width: 260px; height: 26px; }
+    .chat { max-width: 55vw; }
+  }
+  @media (max-width: 640px) {
+    .score { font-size: 12px; padding: 5px 10px; gap: 8px; }
+    .timer { font-size: 22px; }
+    .bomb-status { max-width: 52vw; font-size: 11px; }
+    .chat { display: none; }
+    .bl { width: 170px; padding: 8px 10px; }
+  }
 </style>
 </head>
 <body>

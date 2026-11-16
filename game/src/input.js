@@ -1,8 +1,9 @@
 // input.js — keyboard + mouse input for FROSTLINE.
 // Pointer lock for mouse look, WASD movement, Shift sprint, Ctrl/C crouch,
-// RMB aim-down-sights, B buy menu, E plant/defuse hold, G grenade, Q weapon
-// switch, R reload, 1/2/3 weapon slots. In ?shot= modes pointer lock is
-// skipped (headless screenshots) and the sim drives the camera instead.
+// RMB aim-down-sights, B buy menu, F interact (plant/defuse hold),
+// Q/E lean, mouse wheel weapon switch, G grenade, R reload, 1/2/3 slots.
+// In ?shot= modes pointer lock is skipped (headless screenshots) and the
+// sim drives the camera instead.
 export class Input {
   constructor(canvas, onLockChange) {
     this.keys = new Set();
@@ -18,6 +19,12 @@ export class Input {
     // could never see). Every real mousedown enqueues one fire attempt;
     // the sim consumes it on its next step even if the button is up again.
     this.clickQueue = 0;
+    // v3.16 Phase 1: mouse-wheel weapon switch — accumulate signed wheel
+    // ticks; sim.consumeWheel() takes them (down = next weapon, up = prev).
+    this.wheelDelta = 0;
+    window.addEventListener('wheel', (e) => {
+      this.wheelDelta = Math.max(-3, Math.min(3, this.wheelDelta + Math.sign(e.deltaY)));
+    }, { passive: true });
     this.onLockChange = onLockChange || (() => {});
     this.canvas = canvas;
     window.addEventListener('keydown', (e) => {
@@ -32,7 +39,7 @@ export class Input {
       if (e.code === 'KeyR' || e.code === 'KeyB' || e.code === 'KeyG' || e.code === 'KeyQ' || e.code === 'Digit1' || e.code === 'Digit2' || e.code === 'Digit3' || e.code === 'Digit4' || e.code === 'Space') e.preventDefault();
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
-    window.addEventListener('blur', () => { this.keys.clear(); this.mouseDown = false; this.ads = false; this.clickQueue = 0; });
+    window.addEventListener('blur', () => { this.keys.clear(); this.mouseDown = false; this.ads = false; this.clickQueue = 0; this.wheelDelta = 0; });
     document.addEventListener('mousemove', (e) => {
       if (!this.locked) return;
       this.mouseDX += e.movementX;
@@ -105,5 +112,15 @@ export class Input {
   get sprint() { return this.keys.has('ShiftLeft') || this.keys.has('ShiftRight'); }
   get crouch() { return this.keys.has('ControlLeft') || this.keys.has('KeyC'); }
   get jump() { return this.keys.has('Space'); } // v3.10: Space jumps
-  get plantHeld() { return this.keys.has('KeyE'); }
+  // v3.16 Phase 1: Q/E lean (-1 left, +1 right); F is the interact key —
+  // plant/defuse hold moved here from E so E can lean (the task's mapping;
+  // the audit note's "E stays plant/defuse" cannot coexist with E lean).
+  get lean() { return (this.keys.has('KeyE') ? 1 : 0) - (this.keys.has('KeyQ') ? 1 : 0); }
+  get plantHeld() { return this.keys.has('KeyF'); }
+  get interact() { return this.keys.has('KeyF'); }
+  consumeWheel() {
+    const d = this.wheelDelta;
+    this.wheelDelta = 0;
+    return d;
+  }
 }

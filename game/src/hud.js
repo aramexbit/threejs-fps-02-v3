@@ -226,7 +226,7 @@ export class HUD {
         <div class="team-card team-bas"><b>BASTION</b><span>DEFEND / ATTACK</span></div>
       </div>
       <p class="controls">WASD move · Mouse aim · Click fire · R reload · Shift sprint · Space jump<br>
-      Ctrl crouch · Right-click aim · B buy · E plant / defuse (hold) · G grenade · 4 cycle grenade · Q switch · H help · Esc settings</p>
+      Ctrl crouch · Right-click aim · B buy · F plant / defuse (hold) · G grenade · 4 cycle grenade · Q/E lean · wheel switch weapon · H help · Esc settings</p>
       <p class="diff-line">Difficulty: <b class="start-diff">NORMAL</b> · change in Settings (Esc)</p>
       <p class="cta">CLICK TO PLAY</p>`;
     this.startDiff = this.startOverlay.querySelector('.start-diff');
@@ -703,7 +703,7 @@ export class HUD {
     }
     // v3.13 (item 1): unmissable plant/defuse prompt. The channel bar
     // only appears once progress starts; this tells the player WHAT to do
-    // and WHERE, before they ever press E.
+    // and WHERE, before they ever press F.
     const inSite = (() => {
       for (const key of ['A', 'B']) {
         const c = s.map.sites[key].center;
@@ -714,15 +714,15 @@ export class HUD {
     let prompt = '';
     if (s.phase === 'round' && p.alive) {
       if (!s.bombPlanted && p.hasBomb) {
-        prompt = inSite ? `TAHAN [E] UNTUK PASANG BOM — SITE ${inSite}` : 'Bawa bom ke SITE A / B — tahan [E] untuk pasang';
+        prompt = inSite ? `TAHAN [F] UNTUK PASANG BOM — SITE ${inSite}` : 'Bawa bom ke SITE A / B — tahan [F] untuk pasang';
       } else if (s.bombPlanted && s.attackTeam === 'bastion' && s.bombPos
         && Math.hypot(p.pos.x - s.bombPos.x, p.pos.z - s.bombPos.z) < 2.5) {
-        prompt = p.hasKit ? 'TAHAN [E] UNTUK DEFUSE BOM (KIT — 2,5 dtk)' : 'TAHAN [E] UNTUK DEFUSE BOM';
+        prompt = p.hasKit ? 'TAHAN [F] UNTUK DEFUSE BOM (KIT — 2,5 dtk)' : 'TAHAN [F] UNTUK DEFUSE BOM';
       } else if (s.bombPlanted && s.attackTeam === 'bastion') {
-        prompt = `BOM TERPASANG DI SITE ${s.bombSite} — dekati dan tahan [E] untuk defuse`;
+        prompt = `BOM TERPASANG DI SITE ${s.bombSite} — dekati dan tahan [F] untuk defuse`;
       }
     } else if (s.phase === 'freeze' && p.hasBomb) {
-      prompt = 'Ronde mulai — bawa bom ke SITE A / B, tahan [E] untuk pasang';
+      prompt = 'Ronde mulai — bawa bom ke SITE A / B, tahan [F] untuk pasang';
     }
     if (prompt) {
       this.plantPrompt.textContent = prompt;

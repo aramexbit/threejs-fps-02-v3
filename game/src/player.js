@@ -69,6 +69,10 @@ export class Player {
     this.hasBomb = false;
     this.recoil = 0; this.recoilPitch = 0;
     this.bobPhase = 0; this.stepTimer = 0;
+    // v3.16 Phase 1: lean (-1 left .. +1 right, smoothed), weapon sway
+    // from mouse movement, sprint pose blend, landing dip, smoothed eye Y.
+    this.lean = 0; this.swayX = 0; this.swayY = 0;
+    this._sprintPose = 0; this._landDip = 0; this._smoothEyeY = null;
     this.flashT = 0; this.smokeT = 0;
     this.grenade = null; // active thrown grenade {pos, vel, fuse}
     this.cameraShake = 0;
@@ -227,6 +231,10 @@ export class Player {
     }
     this.crouching = input.crouch;
     const { dx, dy } = input.takeMouse();
+    // v3.16 Phase 1: weapon sway — the viewmodel lags the mouse a touch
+    // (accumulates here, decays at the end of update()).
+    this.swayX = Math.max(-0.035, Math.min(0.035, this.swayX - dx * 0.00012));
+    this.swayY = Math.max(-0.035, Math.min(0.035, this.swayY + dy * 0.00012));
     // v3.10: mouse look honours the settings panel (sensitivity + invert-Y).
     const sens = settings.sensitivity * 0.0021;
     this.yaw -= dx * sens;
@@ -240,7 +248,12 @@ export class Player {
     if (!this.grounded) {
       this.vy -= GRAVITY * dt;
       this.pos.y += this.vy * dt;
-      if (this.pos.y <= 0) { this.pos.y = 0; this.vy = 0; this.grounded = true; }
+      if (this.pos.y <= 0) {
+        // v3.16 Phase 1: landing dip — the camera drops briefly on a hard
+        // landing (vy is still the impact speed here, before it is zeroed).
+        if (this.vy < -3) this._landDip = Math.min(0.12, -this.vy * 0.012);
+        this.pos.y = 0; this.vy = 0; this.grounded = true;
+      }
     }
     const ads = input.ads && this.weapon.def.kind !== 'grenade';
     const speed = this.crouching ? CROUCH_SPEED : (input.sprint && !ads ? SPRINT_SPEED : WALK_SPEED) * (ads ? 0.65 : 1);
@@ -258,6 +271,14 @@ export class Player {
     // Clamp to map bounds.
     this.pos.x = Math.max(this.map.bounds.minX + 0.5, Math.min(this.map.bounds.maxX - 0.5, this.pos.x));
     this.pos.z = Math.max(this.map.bounds.minZ + 0.5, Math.min(this.map.bounds.maxZ - 0.5, this.pos.z));
+    // v3.16 Phase 1: lean (smoothed toward the Q/E input), sprint-pose
+    // blend (only while actually moving fast), weapon-sway decay.
+    const leanTarget = this.alive ? input.lean : 0;
+    this.lean += (leanTarget - this.lean) * Math.min(1, dt * 10);
+    const sprinting = this.alive && input.sprint && !ads && Math.hypot(this.vel.x, this.vel.z) > 1;
+    this._sprintPose += ((sprinting ? 1 : 0) - this._sprintPose) * Math.min(1, dt * 8);
+    this.swayX *= Math.max(0, 1 - dt * 5);
+    this.swayY *= Math.max(0, 1 - dt * 5);
     // Recoil recovery + view bob + footsteps.
     this.recoilPitch = Math.max(0, this.recoilPitch - dt * 0.06);
     const moving = Math.hypot(this.vel.x, this.vel.z);
@@ -295,7 +316,7 @@ export class Player {
   }
 
   // Camera transform after the sim step (render-time, includes bob/shake/ADS).
-  applyCamera(t) {
+  applyCamera(t, dt = 1 / 60) {
     const moving = Math.hypot(this.vel.x, this.vel.z);
     const bob = Math.min(1, moving / WALK_SPEED) * 0.028;
     const bobY = Math.sin(this.bobPhase * 2) * bob;
@@ -312,17 +333,30 @@ export class Player {
       deathEase = Math.min(1, Math.max(0, since / 0.9));
       deathEase = deathEase * deathEase * (3 - 2 * deathEase); // smoothstep
     }
+    // v3.16 Phase 1: smooth eye height (softens crouch/landing steps),
+    // landing dip, lean roll + lateral peek offset (right vector is
+    // (cos yaw, 0, -sin yaw) — the same pattern the bob already uses).
+    // Render dt is capped at 1/30 for the smoothing factors: the raw frame
+    // dt reaches 0.25 under SwiftShader, which would make (1 - dt*6)
+    // negative and zero the landing dip in a single frame.
+    const rdt = Math.min(dt, 1 / 30);
+    const eyeTarget = (this.eyeY + bobY) * (1 - deathEase) + 0.45 * deathEase;
+    if (this._smoothEyeY == null) this._smoothEyeY = eyeTarget;
+    this._smoothEyeY += (eyeTarget - this._smoothEyeY) * Math.min(1, rdt * 14);
+    this._landDip *= Math.max(0, 1 - rdt * 6);
+    const leanRoll = this.lean * (this.adsHeld ? 0.12 : 0.22);
+    const leanSide = this.lean * 0.35 * (1 - deathEase);
     this.camera.position.set(
-      this.pos.x + bobX * Math.cos(this.yaw) * (1 - deathEase),
-      (this.eyeY + bobY) * (1 - deathEase) + 0.45 * deathEase,
-      this.pos.z - bobX * Math.sin(this.yaw) * (1 - deathEase),
+      this.pos.x + bobX * Math.cos(this.yaw) * (1 - deathEase) + Math.cos(this.yaw) * leanSide,
+      this._smoothEyeY - this._landDip,
+      this.pos.z - bobX * Math.sin(this.yaw) * (1 - deathEase) - Math.sin(this.yaw) * leanSide,
     );
     const ads = this.adsHeld ? 1 : 0;
     this.camera.rotation.order = 'YXZ';
     this.camera.rotation.set(
       this.pitch - 0.25 * deathEase + this.recoilPitch + (shake > 0 ? (Math.sin(t * 71) * 0.012 * shake) : 0),
       this.yaw + (shake > 0 ? (Math.cos(t * 63) * 0.012 * shake) : 0),
-      0.5 * deathEase,
+      0.5 * deathEase + leanRoll,
     );
     // v3.14 (item 1): Longbow-7 ADS is a real SCOPE — FOV 22 (~3.4x zoom),
     // not the 74->58 nudge every weapon got. That nudge was the whole
@@ -382,12 +416,12 @@ export class Player {
       // whole sight picture). Dead — the gun is dropped on death.
       if ((isScoped || !this.alive) && this.viewmodel) this.viewmodel.visible = false;
       this.viewmodel.position.set(
-        vm.x * (1 - ads) + bobX * 0.4 * (1 - dip * 0.7),
-        vm.y + bobY * 0.5 * (1 - dip * 0.7) + (ads ? 0.055 + lift : 0) - dip * rd + swing * 0.10,
+        vm.x * (1 - ads) + bobX * 0.4 * (1 - dip * 0.7) + this.lean * 0.04 + this.swayX,
+        vm.y + bobY * 0.5 * (1 - dip * 0.7) + (ads ? 0.055 + lift : 0) - dip * rd + swing * 0.10 + this.swayY - this._sprintPose * 0.05,
         vm.z + kick + (ads ? -0.30 : 0) + dip * 0.05 - swing * 0.18,
       );
-      this.viewmodel.rotation.x = this.recoilPitch * 1.4 + Math.sin(this.bobPhase) * 0.008 + dip * rt + swing * 0.6;
-      this.viewmodel.rotation.z = dip * 0.35;
+      this.viewmodel.rotation.x = this.recoilPitch * 1.4 + Math.sin(this.bobPhase) * 0.008 + dip * rt + swing * 0.6 + this.swayY * 2 + this._sprintPose * 0.45;
+      this.viewmodel.rotation.z = dip * 0.35 + this.lean * 0.18 + this._sprintPose * 0.25;
       // v3.12: spare-mag prop — old mag drops out, fresh mag rises back
       // into the well. v3.13: the path starts at THIS weapon's mag well
       // (item 2) and drops OUT to the shooter's left, silhouetted against

@@ -233,7 +233,8 @@ export class HUD {
     // v3.13: attack/defence SWAPS every round (item 1 + item 7) — the old
     // cards ("SOLARA ATTACK / BASTION HOLD") were only true half the time.
     this.startOverlay = el('div', 'overlay', this.root);
-    this.startOverlay.innerHTML = `<h1>FROSTLINE</h1>
+    this.startOverlay.innerHTML = `<div class="mf-banner"><img src="assets/makefun-logo.png" alt="Built with make.fun"></div>
+      <h1>FROSTLINE</h1>
       <p class="sub">Ironworks Ridge · 5v5 · Bomb mission — attack &amp; defence swap every round.</p>
       <div class="teams">
         <div class="team-card team-sol"><b>SOLARA</b><span>ATTACK / DEFEND</span></div>

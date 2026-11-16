@@ -32,14 +32,33 @@ export function setSoldierTemplate(gltf) { soldierTemplate = gltf; }
 // (the 17:29 user requirement: hands + arms must visibly hold the rifle,
 // on teammates AND enemies, close-up and while moving/shooting).
 const HOLD_POSE = {
-  rArm: { x: 0.90, z: -0.45 }, rFore: { x: 0.70 },
-  lArm: { x: -1.15, z: 0.20 }, lFore: { x: -0.40 },
+  rArm: { x: 0.70, z: -0.45 }, rFore: { x: 0.55 },
+  lArm: { x: -1.45, z: 0.20 }, lFore: { x: -0.25 },
 };
-// (Tuned empirically over 3 rounds in probe-v316/bots4c-tune.mjs: the right
-// hand lands on the grip (dGrip ~0.14) and the left hand on the receiver
-// front / mag-well (local z -0.02). The arm's 0.47 m reach cannot extend
-// to the mid-handguard (local z -0.20), so the support hand grips at the
-// mag well — a real rifle hold, not a miss.)
+// (Retuned over 3 rounds in probe-v316/bots5-tune*.mjs with the hand-track
+// live: dGrip is 0 by construction. The left hand cannot reach the
+// mag-well POINT (0.66 m from the shoulder vs ~0.52 m arm reach — the
+// rifle is held too far forward for that), but with this pose the glove
+// sits ~0.12 m from the rifle centreline, i.e. touching the
+// receiver/handguard body. The mag-well distance is recorded honestly
+// in the probe; the visual read is the gate.)
+// v3.16 Phase 5b: grip point of each rifle type, in the rifle group's own
+// local space — the hand-track puts THIS point exactly on the right hand
+// bone. Real-rifle: the viewmodel grip hand sits at (0,-0.07,0.15) in the
+// normalized group (models.js). Proc-rifle: receiver centre.
+const GRIP_REAL = [0, -0.07, 0.15];
+const GRIP_PROC = [0, 0, 0.05];
+// Support-hand target (forend), same local space — the left-hand gap is
+// measured against this point in the probe.
+const FORE_REAL = [0.01, -0.06, -0.18];
+const FORE_PROC = [0, 0, -0.30];
+// Scratch temps for the per-frame hand-track (no per-frame allocation).
+const _tv1 = new THREE.Vector3();
+const _tv2 = new THREE.Vector3();
+const _tv3 = new THREE.Vector3();
+const _tq1 = new THREE.Quaternion();
+const _tq2 = new THREE.Quaternion();
+const _te1 = new THREE.Euler();
 // Tuning hook (debug): the probe can replace the pose live via
 // window.__holdPose = {...} — the override reads it fresh every frame, so
 // one page load can try several poses. Shipped default is HOLD_POSE.
@@ -449,7 +468,25 @@ export class Bot {
       rFore: cloned.getObjectByName('mixamorigRightForeArm'),
       lArm: cloned.getObjectByName('mixamorigLeftArm'),
       lFore: cloned.getObjectByName('mixamorigLeftForeArm'),
+      rHand: cloned.getObjectByName('mixamorigRightHand'),
+      lHand: cloned.getObjectByName('mixamorigLeftHand'),
     };
+    // v3.16 Phase 5b: readable gloves parented to the hand bones. The
+    // Mixamo hands are small and team-tinted, so at play distance the grip
+    // reads as empty even when the hand is on it (image-65). A dark glove
+    // box + team cuff on each hand bone makes the hold visible.
+    const gloveMat = new THREE.MeshStandardMaterial({ color: 0x2a2d33, roughness: 0.9, metalness: 0.05 });
+    const cuffMat = new THREE.MeshStandardMaterial({ color: TEAM_COLORS[this.team], roughness: 0.6, metalness: 0.2 });
+    for (const hb of [this._bones.rHand, this._bones.lHand]) {
+      if (!hb) continue;
+      const gl = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.08, 0.13), gloveMat);
+      gl.name = 'bot-glove';
+      hb.add(gl);
+      const cf = new THREE.Mesh(new THREE.BoxGeometry(0.105, 0.05, 0.06), cuffMat);
+      cf.position.set(0, 0, 0.08);
+      cf.name = 'bot-cuff';
+      hb.add(cf);
+    }
     this._rifleBase = { x: 0.10, y: 1.38, z: -0.42, ry: 0.35, rx: -0.08 };
     this.scene.remove(this.mesh);
     this.mesh = cloned;
@@ -1193,36 +1230,6 @@ export class Bot {
     const s = Math.sin(this._walkPhase) * swing;
     const legL = this.mesh.userData.legL, legR = this.mesh.userData.legR;
     if (legL && legR) { legL.rotation.x = s; legR.rotation.x = -s; }
-    // v3.12: RELOAD POSE — while the bot reloads (2.2 s) the rifle dips
-    // down and comes back up. Smoothed so it never snaps; restores the
-    // exact base pose (rotation.x -0.08, y 1.38) when done.
-    // v3.13: THROW POSE — while the bot winds up a grenade (0.6 s) the
-    // rifle swings up-back and then down-forward, an overhand lob.
-    // Throw wins over reload (they never coincide: the throw requires
-    // reloading <= 0); both restore the exact base pose when done.
-    if (!this._rifleMesh || !this._rifleMesh.parent) {
-      this._rifleMesh = this.mesh.getObjectByName('real-rifle') || this.mesh.getObjectByName('proc-rifle');
-    }
-    if (this.throwT > 0 && this._rifleMesh) {
-      const tp = 1 - this.throwT / 0.6;
-      const swing = Math.sin(Math.min(1, Math.max(0, tp)) * Math.PI);
-      this._rifleMesh.rotation.x = this._rifleBase.rx - swing * 0.9;
-      this._rifleMesh.position.y = this._rifleBase.y + swing * 0.15;
-      this._reloadPose = 0;
-    } else {
-      this._reloadPose = this._reloadPose || 0;
-      const rpTarget = this.reloading > 0 ? 1 : 0;
-      this._reloadPose += (rpTarget - this._reloadPose) * Math.min(1, dt * 6);
-      if (this._reloadPose > 0.01) {
-        if (this._rifleMesh) {
-          this._rifleMesh.rotation.x = this._rifleBase.rx - this._reloadPose * 0.5;
-          this._rifleMesh.position.y = this._rifleBase.y - this._reloadPose * 0.10;
-        }
-      } else if (this._rifleMesh) {
-        this._rifleMesh.rotation.x = this._rifleBase.rx;
-        this._rifleMesh.position.y = this._rifleBase.y;
-      }
-    }
     // v3.16 Phase 4c: Soldier animation + rifle-hold arm override. The
     // mixer runs the Walk/Idle blend (weights from real speed); the arm
     // override runs AFTER mixer.update() every frame, so the Walk's
@@ -1241,6 +1248,67 @@ export class Bot {
       if (b.rFore) b.rFore.rotateX(HP.rFore.x);
       if (b.lArm) { b.lArm.rotateX(HP.lArm.x); b.lArm.rotateZ(HP.lArm.z); }
       if (b.lFore) b.lFore.rotateX(HP.lFore.x);
+    }
+    // v3.16 Phase 5b: HAND-TRACK the rifle — the grip lands EXACTLY on the
+    // right hand bone every frame (0 gap by construction). Phase 4c tuned
+    // the pose to a 0.157 m gap and the user still read it as floating
+    // (image-65): at play distance a 15 cm gap IS floating. The rifle
+    // position is derived from the right hand each frame, so it holds in
+    // EVERY phase (buy/idle/walk/combat) — the override above runs in all
+    // of them. The throw/reload poses below add their offsets on top of
+    // the tracked pose instead of replacing it.
+    // BUG (found by track-diag, Phase 5b): the re-find above used
+    // `!this._rifleMesh.parent` — but after equipSoldier() swaps the mesh,
+    // the OLD rifle's parent is the REMOVED old mesh (still truthy), so the
+    // track kept moving the off-scene old rifle while the new rifle stayed
+    // at its base pose (dGrip stuck at 0.157). Re-find whenever the rifle
+    // is not a child of the CURRENT mesh.
+    if (!this._rifleMesh || this._rifleMesh.parent !== this.mesh) {
+      this._rifleMesh = this.mesh.getObjectByName('real-rifle') || this.mesh.getObjectByName('proc-rifle');
+    }
+    let track = { x: this._rifleBase.x, y: this._rifleBase.y, z: this._rifleBase.z, rx: this._rifleBase.rx };
+    if (this._soldier && this._rifleMesh && this._bones && this._bones.rHand) {
+      this.mesh.updateMatrixWorld(true);
+      const handW = this._bones.rHand.getWorldPosition(_tv1);
+      const gripLocal = this._rifleMesh.name === 'real-rifle' ? GRIP_REAL : GRIP_PROC;
+      _te1.set(this._rifleBase.rx, this._rifleBase.ry, 0);
+      _tq1.setFromEuler(_te1);
+      this.mesh.getWorldQuaternion(_tq2);
+      _tq2.multiply(_tq1); // rifle world orientation
+      _tv2.set(gripLocal[0], gripLocal[1], gripLocal[2]).applyQuaternion(_tq2);
+      _tv3.copy(handW).sub(_tv2); // rifle origin in world space
+      const rifleL = this.mesh.worldToLocal(_tv3);
+      this._rifleMesh.position.copy(rifleL);
+      this._rifleMesh.rotation.set(this._rifleBase.rx, this._rifleBase.ry, 0);
+      track = { x: rifleL.x, y: rifleL.y, z: rifleL.z, rx: this._rifleBase.rx };
+    }
+    this._rifleTrack = track;
+    // v3.12: RELOAD POSE — while the bot reloads (2.2 s) the rifle dips
+    // down and comes back up. Smoothed so it never snaps; restores the
+    // tracked pose when done.
+    // v3.13: THROW POSE — while the bot winds up a grenade (0.6 s) the
+    // rifle swings up-back and then down-forward, an overhand lob.
+    // Throw wins over reload (they never coincide: the throw requires
+    // reloading <= 0); both restore the tracked pose when done.
+    if (this.throwT > 0 && this._rifleMesh) {
+      const tp = 1 - this.throwT / 0.6;
+      const swing = Math.sin(Math.min(1, Math.max(0, tp)) * Math.PI);
+      this._rifleMesh.rotation.x = track.rx - swing * 0.9;
+      this._rifleMesh.position.y = track.y + swing * 0.15;
+      this._reloadPose = 0;
+    } else {
+      this._reloadPose = this._reloadPose || 0;
+      const rpTarget = this.reloading > 0 ? 1 : 0;
+      this._reloadPose += (rpTarget - this._reloadPose) * Math.min(1, dt * 6);
+      if (this._reloadPose > 0.01) {
+        if (this._rifleMesh) {
+          this._rifleMesh.rotation.x = track.rx - this._reloadPose * 0.5;
+          this._rifleMesh.position.y = track.y - this._reloadPose * 0.10;
+        }
+      } else if (this._rifleMesh) {
+        this._rifleMesh.rotation.x = track.rx;
+        this._rifleMesh.position.y = track.y;
+      }
     }
   }
 }

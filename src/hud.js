@@ -115,6 +115,38 @@ export class HUD {
     this._diffLabel = '';
     // --- Damage vignette ---
     this.damageFx = el('div', 'damagefx', this.root);
+    // --- v3.14 (item 1): sniper scope overlay — dark ring + crosshair,
+    // shown only while ADS-ing the Longbow-7. Inline styles on purpose
+    // (same pattern as the death overlay): no index.html touch.
+    this.scopeOverlay = el('div', 'scope-overlay hidden', this.root);
+    Object.assign(this.scopeOverlay.style, {
+      position: 'fixed', inset: '0', pointerEvents: 'none', zIndex: '40',
+      background: 'radial-gradient(circle 31vmin at 50% 50%, transparent 0, transparent 30vmin, rgba(0,0,0,0.97) 31.5vmin, rgba(0,0,0,0.97) 100%)',
+    });
+    const scopeRing = el('div', '', this.scopeOverlay);
+    Object.assign(scopeRing.style, {
+      position: 'absolute', left: '50%', top: '50%', width: '62vmin', height: '62vmin',
+      transform: 'translate(-50%,-50%)', borderRadius: '50%',
+      border: '3px solid rgba(0,0,0,0.9)', boxShadow: 'inset 0 0 40px rgba(0,0,0,0.8)',
+    });
+    const scopeH = el('div', '', this.scopeOverlay);
+    Object.assign(scopeH.style, { position: 'absolute', left: '50%', top: '50%', width: '62vmin', height: '2px', transform: 'translate(-50%,-50%)', background: 'rgba(0,0,0,0.85)' });
+    const scopeV = el('div', '', this.scopeOverlay);
+    Object.assign(scopeV.style, { position: 'absolute', left: '50%', top: '50%', width: '2px', height: '62vmin', transform: 'translate(-50%,-50%)', background: 'rgba(0,0,0,0.85)' });
+    const scopeLabel = el('div', '', this.scopeOverlay);
+    Object.assign(scopeLabel.style, { position: 'absolute', left: '50%', bottom: '12%', transform: 'translateX(-50%)', color: 'rgba(255,255,255,0.75)', fontSize: '13px', fontWeight: '700', letterSpacing: '2px' });
+    scopeLabel.textContent = 'LONGBOW-7 · 8×';
+    // --- v3.14 (item 2): death flash — a red wash that floods in on the
+    // killing blow and fades over ~1.5 s (the 'damage' flash is a 180 ms
+    // flicker; this one lingers while the camera falls).
+    this.deathFx = el('div', 'deathfx', this.root);
+    Object.assign(this.deathFx.style, {
+      position: 'absolute', inset: '0', pointerEvents: 'none', zIndex: '45',
+      background: 'radial-gradient(circle at 50% 50%, rgba(224,30,20,0.25) 0%, rgba(160,10,5,0.75) 100%)',
+      opacity: '0',
+    });
+    this._deathFxT = 0;
+    this._killer = ''; // "Name — [Weapon]" from the playerDied event
     // --- Buy menu (backdrop dims the bright snow behind it) ---
     this.buyBackdrop = el('div', 'buy-backdrop hidden', this.root);
     this.buy = el('div', 'buy hidden', this.root);
@@ -357,7 +389,7 @@ export class HUD {
       ['W A S D', 'Bergerak (maju / kiri / mundur / kanan)'],
       ['Mouse', 'Aim (bidik)'],
       ['Klik kiri', 'Tembak'],
-      ['Klik kanan', 'ADS — bidik besi (lebih akurat, lebih lambat)'],
+      ['Klik kanan', 'ADS — bidik besi (lebih akurat, lebih lambat) · Longbow-7: scope zoom 8×'],
       ['R', 'Reload senjata'],
       ['E (tahan)', 'Pasang bom — bawa bom ke SITE A / B, tahan 3 detik · Defuse bom — dekati bom terpasang, tahan sampai penuh (kit: 2,5 detik)'],
       ['B', 'Buka shop — hanya saat freeze (15 detik sebelum ronde)'],
@@ -599,6 +631,12 @@ export class HUD {
         this.damageFx.style.opacity = '0.55';
         setTimeout(() => { this.damageFx.style.opacity = '0'; }, 180);
       }
+      if (e.type === 'playerDied') {
+        // v3.14 (item 2): the killing blow — red wash + killer line.
+        this._killer = `${e.killer} — [${e.weapon}]`;
+        this.deathFx.style.opacity = '0.9';
+        this._deathFxT = 1.6;
+      }
       if (e.type === 'banner') { /* banner text handled below */ }
     }
     events.length = 0;
@@ -714,10 +752,19 @@ export class HUD {
     if (!p.alive && s.phase !== 'matchEnd') {
       this.deathOverlay.classList.remove('hidden');
       const rt = Math.max(0, Math.ceil(s.timer));
-      this.deathSub.textContent = s.phase === 'round'
+      const respawn = s.phase === 'round'
         ? `Round ends in ${Math.floor(rt / 60)}:${String(rt % 60).padStart(2, '0')} — you respawn next round`
         : 'Next round starting…';
-    } else this.deathOverlay.classList.add('hidden');
+      // v3.14 (item 2): say WHO killed you — the old sub only gave the
+      // respawn timer, so deaths felt random and unanswerable.
+      this.deathSub.textContent = this._killer ? `Dibunuh oleh ${this._killer} · ${respawn}` : respawn;
+    } else { this.deathOverlay.classList.add('hidden'); this._killer = ''; }
+    // v3.14 (item 2): the death flash fades over ~1.5 s (dt-driven, so it
+    // tracks the sim clock like everything else).
+    if (this._deathFxT > 0) {
+      this._deathFxT -= dt;
+      this.deathFx.style.opacity = String(Math.max(0, (this._deathFxT / 1.6) * 0.9));
+    }
     // Health / money / ammo / weapon slots / utility.
     this.hpFill.style.width = `${p.hp}%`;
     this.hpFill.style.background = p.hp > 50 ? '#6fc3d8' : p.hp > 25 ? '#ffb347' : '#e05a4e';
@@ -761,6 +808,12 @@ export class HUD {
     const spread = 6 + Math.hypot(p.vel.x, p.vel.z) * 1.2 + p.recoil * 120;
     this.cross.style.setProperty('--sp', `${Math.min(26, spread)}px`);
     this.cross.classList.toggle('ads', !!p.adsHeld);
+    // v3.14 (item 1): the scope overlay shows only while ADS-ing the
+    // Longbow-7 alive; the plain crosshair hides inside the scope (the
+    // overlay carries its own crosshair).
+    const scoped = p.alive && p.adsHeld && p.weapon.def.zoom;
+    this.scopeOverlay.classList.toggle('hidden', !scoped);
+    this.cross.style.display = scoped ? 'none' : '';
     this.drawMinimap(bots);
   }
 }

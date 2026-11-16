@@ -83,6 +83,17 @@ export class AudioSys {
     this._tone(900, 0.05, 'square', 0.14, null, 0.8);
   }
   hit() { if (this.ensure()) this._tone(2400, 0.05, 'sine', 0.2); }
+  // v3.14 (item 3): HURT — the player just took an enemy bullet. A low
+  // thud (noise burst through a lowpass + a falling sub tone) — nothing
+  // like the 2400 Hz hitmarker ping or a gunshot, so it reads instantly
+  // as "I am being hit". _hurtCalls counts invocations BEFORE ensure()
+  // so headless probes can verify the call path (no AudioContext there).
+  hurt() {
+    this._hurtCalls = (this._hurtCalls || 0) + 1;
+    if (!this.ensure()) return;
+    this._burst(0.18, 250, 'lowpass', 0.9);
+    this._tone(110, 0.25, 'sine', 0.5, 45);
+  }
   kill() { if (this.ensure()) { this._tone(1800, 0.06, 'sine', 0.22); this._tone(2400, 0.08, 'sine', 0.22, null, 0.07); } }
   beep(final = false) { if (this.ensure()) this._tone(final ? 1400 : 950, 0.09, 'sine', 0.22); }
   explosion() {

@@ -6,6 +6,11 @@
 // Pine: "Pine" by Quaternius, Poly Pizza Stylized-Nature-MegaKit bundle,
 //   model page https://poly.pizza/m/rfnxJv0Rqa, Licence "CC0 1.0".
 //   File: assets/meshy/pine.glb.
+// Soldier: "Soldier" glTF sample model distributed with the three.js
+//   examples (https://github.com/mrdoob/three.js — examples/models/gltf/
+//   Soldier.glb, MIT repo; the model itself is a Mixamo character, free to
+//   use, no attribution required — credited here anyway). Clips: Idle,
+//   Walk, Run, TPose. File: assets/soldier.glb (2.2 MB).
 //
 // The game always starts on its primitive builds and upgrades in place when
 // a GLB arrives; a failed load resolves null and the primitive stays, so the
@@ -120,6 +125,16 @@ export async function loadRifle() {
 export async function loadPine() {
   try {
     return normalizePine(await loader.loadAsync('assets/meshy/pine.glb'));
+  } catch { return null; }
+}
+
+// v3.16 Phase 4c: the human soldier for the bots. Returns the raw parsed
+// glTF (scene + animations); bots.js clones it per bot with
+// SkeletonUtils so each bot has its own skeleton + mixer. Never rejects:
+// a failed load resolves null and the bots keep the procedural mesh.
+export async function loadSoldier() {
+  try {
+    return await loader.loadAsync('assets/soldier.glb');
   } catch { return null; }
 }
 

@@ -11,14 +11,14 @@ import * as THREE from 'three';
 import { buildMap } from './map.js';
 import { createSky, createClouds, createLights, applyEnvironment } from './sky.js';
 import { Player } from './player.js';
-import { Bot } from './bots.js';
+import { Bot, setSoldierTemplate } from './bots.js';
 import { Sim } from './sim.js';
 import { Input } from './input.js';
 import { HUD } from './hud.js';
 import { AudioSys } from './audio.js';
 import { ParticleSystem, MuzzleFlash, DecalPool, Fire, ChimneySmoke, Snowfall, Explosion, TracerPool, CasingPool } from './effects.js';
 import { mulberry32 } from './rng.js';
-import { loadRifle, loadPine } from './models.js';
+import { loadRifle, loadPine, loadSoldier } from './models.js';
 import { setTextureAnisotropy } from './textures.js';
 import { settings, QUALITY } from './settings.js';
 
@@ -571,6 +571,11 @@ setupShot();
 // gates on the RIFLE only (the pine loads at frame 40 and gates nothing);
 // the old page-load backstop fired __shotReady before the rifle existed,
 // so the "v3.7" screenshots showed the primitive AR-77.
+// v3.16 Phase 4c: modelsSettled now ALSO gates on the Soldier (2.2 MB) —
+// the bot close-up probe must see the human models, not the procedural
+// fallback. Either loader failing still resolves (null) and unblocks.
+let rifleDone = false, soldierDone = false;
+const maybeSettled = () => { if (rifleDone && soldierDone) modelsSettled = true; };
 loadRifle().then((r) => {
   if (r) {
     player.setGlbRifle(r);
@@ -578,6 +583,12 @@ loadRifle().then((r) => {
     // geometries/materials shared), replacing the boxy procedural rifle.
     for (const b of bots) b.equipRealRifle(r.group);
   }
-}).catch(() => {}).finally(() => { modelsSettled = true; });
+}).catch(() => {}).finally(() => { rifleDone = true; maybeSettled(); });
+loadSoldier().then((s) => {
+  if (s) {
+    setSoldierTemplate(s);
+    for (const b of bots) b.equipSoldier();
+  }
+}).catch(() => {}).finally(() => { soldierDone = true; maybeSettled(); });
 setTimeout(() => { modelsSettled = true; }, 15000);
 requestAnimationFrame(frame);

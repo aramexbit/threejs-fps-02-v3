@@ -92,11 +92,11 @@ function mats() {
     fde: new THREE.MeshStandardMaterial({ color: 0x6b5a44, roughness: 0.8, metalness: 0.05 }), // flat dark earth furniture
     wornDark: new THREE.MeshStandardMaterial({ color: 0x2a2e33, roughness: 0.6, metalness: 0.6 }), // worn / oiled steel
     wood: new THREE.MeshStandardMaterial({ color: 0x5a4028, roughness: 0.8, metalness: 0.0 }),
-    glove: new THREE.MeshStandardMaterial({ color: 0x6b5a44, roughness: 0.95, metalness: 0.0 }), // v3.16 Phase 4b: lighter tan (was 0x54483a — the old hand was one flat dark brown and vanished against the gunmetal)
-    gloveCuff: new THREE.MeshStandardMaterial({ color: 0x8a7a5e, roughness: 0.95, metalness: 0.0 }), // v3.16 Phase 4b: light tan cuff + knuckle strip, catches the sun
-    gloveKnuckle: new THREE.MeshStandardMaterial({ color: 0x9a8a68, roughness: 0.9, metalness: 0.0 }), // v3.16 Phase 4b: knuckle bumps
-    sleeve: new THREE.MeshStandardMaterial({ color: 0x2e3138, roughness: 0.95, metalness: 0.0 }), // v3.16 Phase 4b: dark forearm sleeve
-    sleeveBand: new THREE.MeshStandardMaterial({ color: 0x8f1d16, roughness: 0.6, metalness: 0.2 }), // v3.16 Phase 4b: dark-red Solara cuff band (bright red read as a floating block)
+    glove: new THREE.MeshStandardMaterial({ color: 0xa8875a, roughness: 0.9, metalness: 0.0 }), // v3.16 Phase 5a: much lighter tan (was 0x6b5a44 — the brown hand vanished against the gunmetal in image-66; CODM f-03 read comes from a light glove + bright sleeve)
+    gloveCuff: new THREE.MeshStandardMaterial({ color: 0xcbb27f, roughness: 0.9, metalness: 0.0 }), // v3.16 Phase 5a: pale tan cuff + knuckle strip, catches the sun (was 0x8a7a5e)
+    gloveKnuckle: new THREE.MeshStandardMaterial({ color: 0xd8c08e, roughness: 0.85, metalness: 0.0 }), // v3.16 Phase 5a: pale knuckle bumps (was 0x9a8a68)
+    sleeve: new THREE.MeshStandardMaterial({ color: 0xe86a1e, roughness: 0.9, metalness: 0.0 }), // v3.16 Phase 5a: BRIGHT ORANGE sleeve (was near-black 0x2e3138 — the dark sleeve was invisible, so the red cuff band read as a floating red block in image-66; CODM f-03: orange sleeve is what makes the arm read)
+    sleeveBand: new THREE.MeshStandardMaterial({ color: 0x7a1a12, roughness: 0.6, metalness: 0.2 }), // v3.16 Phase 5a: muted dark-red cuff band, thinner now (was 0x8f1d16)
     glass: new THREE.MeshStandardMaterial({ color: 0x9fc4d8, roughness: 0.1, metalness: 0.4, emissive: 0x2a4a5c, transparent: true, opacity: 0.65 }), // v3.2: glass reads (was emissive 0x1a2c38, opacity 0.5)
     accentTeal: new THREE.MeshStandardMaterial({ color: 0x2fa8a0, roughness: 0.5, metalness: 0.5 }), // v3.16 Phase 4b: Vex-9 accent strip
     accentGold: new THREE.MeshStandardMaterial({ color: 0xc9a227, roughness: 0.35, metalness: 0.9 }), // v3.16 Phase 4b: Longbow scope ring
@@ -150,6 +150,7 @@ export function glovedHand(x, y, z, tilt = 0.25, side = 1) {
   hand.name = 'vm-hand';
   hand.position.set(x, y, z);
   hand.rotation.x = tilt;
+  hand.scale.setScalar(1.18); // v3.16 Phase 5a: bigger hands — the 1.0 hands read as small dark blocks at FOV 74; bigger + lighter = readable as hands
   // Palm — wider than the grip so it reads on both sides of it.
   hand.add(box(0.10, 0.065, 0.13, M.glove, 0, 0, 0));
   // Curled fingers under the grip front + 3 knuckle bumps on the
@@ -172,9 +173,9 @@ export function glovedHand(x, y, z, tilt = 0.25, side = 1) {
   sleeve.rotation.x = 1.0; sleeve.rotation.z = side * 0.22;
   sleeve.name = 'vm-sleeve';
   hand.add(sleeve);
-  // Dark-red cuff band (Solara) where sleeve meets glove — muted so it
-  // reads as a cuff, not a floating red block.
-  const band = box(0.135, 0.135, 0.035, M.sleeveBand, side * 0.02, -0.05, 0.035);
+  // Dark-red cuff band (Solara) where sleeve meets glove — thin now, so it
+  // reads as a cuff on the bright sleeve, not a floating red block.
+  const band = box(0.125, 0.125, 0.022, M.sleeveBand, side * 0.02, -0.05, 0.035);
   band.rotation.x = 1.0; band.rotation.z = side * 0.22;
   hand.add(band);
   return hand;

@@ -65,8 +65,12 @@ export function normalizeRifle(gltf) {
         m.color.r = Math.min(m.color.r, 0.95);
         m.color.g = Math.min(m.color.g, 0.95);
         m.color.b = Math.min(m.color.b, 0.95);
-        if (m.name === 'MainDark') { m.roughness = 0.45; m.metalness = 0.85; } // gunmetal receiver
-        else if (m.name === 'MainLight') { m.roughness = 0.38; m.metalness = 0.9; } // worn steel barrel/edges
+        // v3.16 Phase 5a: metalness DOWN (was 0.85/0.9) — the viewmodel scene
+        // had no environment map, so high-metal faces went near-black and the
+        // rifle read as a black slab in image-66. vmScene gets the world env
+        // now (main.js), and 0.55/0.6 still reads as metal with IBL.
+        if (m.name === 'MainDark') { m.roughness = 0.45; m.metalness = 0.55; } // gunmetal receiver
+        else if (m.name === 'MainLight') { m.roughness = 0.38; m.metalness = 0.6; } // worn steel barrel/edges
         else if (m.roughness < 0.9) { m.roughness = 0.85; m.metalness = 0.1; } // polymer furniture
       }
     }

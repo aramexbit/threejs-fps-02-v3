@@ -19,7 +19,7 @@ import { AudioSys } from './audio.js';
 import { ParticleSystem, MuzzleFlash, DecalPool, Fire, ChimneySmoke, Snowfall, Explosion, TracerPool, CasingPool } from './effects.js';
 import { mulberry32 } from './rng.js';
 import { loadRifle, loadPine, loadSoldier } from './models.js';
-import { setTextureAnisotropy } from './textures.js';
+import { setTextureAnisotropy, loadAmbientTextures } from './textures.js';
 import { settings, QUALITY } from './settings.js';
 
 const params = new URLSearchParams(location.search);
@@ -68,6 +68,11 @@ scene.add(createClouds());
 const lights = createLights(scene);
 applyEnvironment(renderer, scene, sky);
 const map = buildMap(scene);
+// v3.16 Phase 4d: AmbientCG photo textures (CC0, vendored) upgrade the
+// flat-surface materials (concrete walls, flat steel, pallet wood) once
+// loaded. Same fire-and-forget pattern as loadPine: on failure the
+// procedural textures stay and the game is unaffected.
+loadAmbientTextures().then((a) => { if (a) map.upgradeAmbient(a); }).catch(() => {});
 
 // --- Effects -------------------------------------------------------------------
 const fx = {

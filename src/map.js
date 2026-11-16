@@ -9,6 +9,7 @@ import { fbm, mulberry32 } from './rng.js';
 import {
   concreteTextures, containerTextures, grateTextures, hazardTextures, rockTextures,
   sandbagTextures, snowTextures, wallSignTexture, woodTextures, siteLetterTexture, siteSignTexture,
+  diamondPlateTextures, hazardLineTextures,
 } from './textures.js';
 
 export const MAP = { w: 44, h: 36, halfW: 22, halfH: 18 };
@@ -106,6 +107,12 @@ export function buildMap(scene) {
 
   const snowMat = std({ ...snow, roughness: 0.9, metalness: 0 });
   const concMat = std({ ...concrete, roughness: 0.92, metalness: 0 });
+  // v3.16 Phase 4d: a SECOND concrete material for the sunlit perimeter
+  // walls. The AmbientCG photo concrete reads well outdoors but is too
+  // dark/noisy inside the enclosed foundry/boiler, where the procedural
+  // concrete (light, cracked) stays readable — so the photo set upgrades
+  // ONLY the perimeter walls, and the interiors keep procedural.
+  const concMatExt = std({ ...concrete, roughness: 0.92, metalness: 0 });
   const woodMat = std({ ...wood, roughness: 0.85, metalness: 0 });
   const hazardMat = std({ ...hazard, roughness: 0.6, metalness: 0.55 });
   const sandMat = std({ ...sandbag, roughness: 0.96, metalness: 0 });
@@ -140,7 +147,7 @@ export function buildMap(scene) {
     [-MAP.halfW - 0.6, 0, 1.2, MAP.h + 2], [MAP.halfW + 0.6, 0, 1.2, MAP.h + 2],
   ];
   for (const [x, z, w, d] of walls) {
-    group.add(boxAt(concMat, w, wallH, d, x, wallH / 2, z));
+    group.add(boxAt(concMatExt, w, wallH, d, x, wallH / 2, z));
     addCollider(x, z, w / 2, d / 2, wallH, 'concrete');
   }
 
@@ -676,19 +683,44 @@ export function buildMap(scene) {
   sign('A', 10.5, -15.5);
   sign('B', 10.5, 15.5);
 
-  // --- v3.16 Phase 3a: reference-style industrial detail -----------------
-  // Metal grate walkway strips down the mid service road (flat planes at
-  // y 0.02, NO colliders — bots and players walk over them exactly like
-  // snow, so the waypoint graph is untouched).
-  const grate = grateTextures(97, 256, 4);
-  const grateMat = std({ ...grate, roughness: 0.55, metalness: 0.8 });
+  // --- v3.16 Phase 4d: metal grate walkway strips down the mid service road
+  // (flat planes at y 0.02, NO colliders — bots and players walk over them
+  // exactly like snow, so the waypoint graph is untouched). Diamond plate
+  // (procedural — no diamond plate exists on AmbientCG) replaces the plain
+  // grate texture: raised tread reads as a real industrial walkway.
+  const diamond = diamondPlateTextures(113, 256, 4);
+  const diamondMat = std({ ...diamond, roughness: 0.5, metalness: 0.85 });
   for (const gx of [-4, 4]) {
-    const strip = new THREE.Mesh(new THREE.PlaneGeometry(8, 2.4), grateMat);
+    const strip = new THREE.Mesh(new THREE.PlaneGeometry(8, 2.4), diamondMat);
     strip.rotation.x = -Math.PI / 2;
     strip.position.set(gx, 0.02, 0);
     strip.receiveShadow = true;
     group.add(strip);
   }
+  // Hazard lines at the site entrances: flat yellow/black stripe planes
+  // along the west opening of each site (y 0.02, no colliders — walked
+  // over like snow). They mark where the site starts, CODM f-07 style.
+  const hazardLineTex = hazardLineTextures(127);
+  const hazardLineMat = std({ map: hazardLineTex, roughness: 0.6, metalness: 0.3 });
+  hazardLineMat.map.repeat.set(1, 6); // tile along the 11.2 m length (world Z)
+  for (const [hx, hz] of [[9.2, -12], [9.2, 12]]) {
+    const line = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 11.2), hazardLineMat);
+    line.rotation.x = -Math.PI / 2;
+    line.position.set(hx, 0.02, hz);
+    line.receiveShadow = true;
+    group.add(line);
+  }
+  // --- v3.16 Phase 4d: accent lights (reference-style purple/teal) ----------
+  // Low point lights at the sites, no shadows (perf): purple over the
+  // Foundry furnace, teal over the Crane Yard boiler. The sun stays the
+  // warm key light; these only tint the site interiors. Kept soft
+  // (intensity 6, hung high) — intensity 10 washed the snow floor blue.
+  const accentA = new THREE.PointLight(0x8b5cf6, 6, 13, 1.6);
+  accentA.position.set(15, 4.2, -12);
+  group.add(accentA);
+  const accentB = new THREE.PointLight(0x2dd4bf, 6, 13, 1.6);
+  accentB.position.set(15, 4.2, 12);
+  group.add(accentB);
   // Big wall signs, flush on existing walls (no colliders, no nav impact).
   const wallSign = (text, sub, w, h, x, y, z, ry) => {
     const tex = wallSignTexture(text, sub);
@@ -704,6 +736,60 @@ export function buildMap(scene) {
   wallSign('IRONWORKS', 'RIDGE', 7, 1.75, -21.94, 2.8, 0, Math.PI / 2); // west wall, faces east
   wallSign('FOUNDRY', 'SITE A', 5, 1.25, 15, 2.6, -17.14, 0); // foundry north wall, faces south into the site
   wallSign('CRANE YARD', 'SITE B', 5, 1.25, 19.5, 2.4, 12.44, Math.PI); // boiler block north face, faces north
+  // v3.16 Phase 4d: two more wall signs (props that make the map feel like
+  // a real workplace). Flush on existing walls, no colliders, no nav impact.
+  wallSign('DANGER', 'HIGH VOLTAGE', 4, 1.0, 20.15, 2.6, -12, -Math.PI / 2); // foundry east wall, faces west into the site
+  wallSign('NO SMOKING', 'FUEL STORE', 4, 1.0, 19.5, 2.4, 17.55, Math.PI); // boiler block south face, faces south
+
+  // --- v3.16 Phase 4d: props — potted plants, table + chairs ----------------
+  // All in safe spots: corners outside the waypoint box, or against a wall
+  // inside a site, never on a nav lane and never inside a collider. The
+  // table gets a small collider (re-probed: nav must stay 36/36); the
+  // plants are corner dressing with no collider, like the grass tufts.
+  const potMat = std({ color: 0x8a4a2a, roughness: 0.9, metalness: 0 });
+  const plantMat = std({ color: 0x3a6b35, roughness: 0.95, metalness: 0 });
+  const pottedPlant = (x, z, s = 1) => {
+    const g = new THREE.Group();
+    g.position.set(x, 0, z);
+    const pot = cylAt(potMat, 0.28 * s, 0.2 * s, 0.5 * s, 0, 0.25 * s, 0, 10);
+    g.add(pot);
+    const bush = new THREE.Mesh(new THREE.IcosahedronGeometry(0.42 * s, 1), plantMat);
+    bush.position.y = 0.75 * s;
+    bush.scale.y = 0.9;
+    bush.castShadow = true;
+    g.add(bush);
+    const bush2 = new THREE.Mesh(new THREE.IcosahedronGeometry(0.26 * s, 1), plantMat);
+    bush2.position.set(0.2 * s, 1.0 * s, 0.1 * s);
+    bush2.castShadow = true;
+    g.add(bush2);
+    group.add(g);
+  };
+  pottedPlant(-20.5, -16.5, 1.1); // Solara-side north-west corner
+  pottedPlant(-20.5, 16.5, 1.0); // Solara-side south-west corner
+  pottedPlant(20.5, 16.5, 1.1); // Bastion-side south-east corner
+  // Work table + two chairs in the foundry's south-west corner, against
+  // the south wall. Nearest waypoint (13,-12) is 4.6 m away; no lane
+  // passes within 4 m, so the small collider cannot cut the graph.
+  {
+    const tx = 10.5, tz = -16.3;
+    const top = boxAt(woodMat, 1.7, 0.08, 0.95, tx, 0.78, tz);
+    group.add(top);
+    for (const [lx, lz] of [[-0.75, -0.38], [0.75, -0.38], [-0.75, 0.38], [0.75, 0.38]]) {
+      group.add(boxAt(woodMat, 0.09, 0.78, 0.09, tx + lx, 0.39, tz + lz));
+    }
+    // Two chairs (seat + backrest) facing the table from the north side.
+    for (const cx of [tx - 0.4, tx + 0.4]) {
+      group.add(boxAt(woodMat, 0.45, 0.07, 0.45, cx, 0.45, tz + 0.85));
+      group.add(boxAt(woodMat, 0.45, 0.6, 0.07, cx, 0.75, tz + 1.05));
+      for (const [lx, lz] of [[-0.18, -0.18], [0.18, -0.18], [-0.18, 0.18], [0.18, 0.18]]) {
+        group.add(boxAt(darkSteel, 0.05, 0.45, 0.05, cx + lx, 0.22, tz + 0.85 + lz));
+      }
+    }
+    // A couple of crates on the table (paperwork / parts vibe).
+    group.add(boxAt(woodMat, 0.35, 0.25, 0.3, tx - 0.45, 0.95, tz - 0.1, 0.3));
+    group.add(boxAt(steelMat, 0.22, 0.3, 0.22, tx + 0.5, 0.97, tz + 0.15, 0.2));
+    addCollider(tx, tz, 0.95, 0.65, 0.9, 'wood');
+  }
 
   // v3.16 Phase 4a: the make.fun logo billboard (Phase 3b) was REMOVED on
   // user order 16 Nov 17:03 ("buang spanduknya") — no board, no logo
@@ -807,6 +893,28 @@ export function buildMap(scene) {
         g.add(tree);
       });
     },
+    // v3.16 Phase 4d: swap the procedural maps on the flat-surface
+    // materials for the AmbientCG photo sets (loaded async by main.js).
+    // The scalar roughness is set to 1.0 wherever a roughnessMap is
+    // added (three.js multiplies map x scalar); metalness keeps its
+    // scalar (no Metalness.jpg was vendored). The procedural aoMap /
+    // metalnessMap stay — they are generic shading, not surface detail.
+    // Called once on load success; on failure the procedural textures
+    // simply stay, so the game never depends on the JPGs.
+    upgradeAmbient(ambient) {
+      if (!ambient) return;
+      const apply = (mat, set) => {
+        mat.map = set.map;
+        mat.normalMap = set.normalMap;
+        mat.roughnessMap = set.roughnessMap;
+        mat.roughness = 1.0;
+        mat.needsUpdate = true;
+      };
+      apply(concMatExt, ambient.concrete); // perimeter walls only — the interiors keep procedural (see concMatExt)
+      apply(woodMat, ambient.wood);
+      apply(steelMat, ambient.metal);
+      apply(darkSteel, ambient.metal);
+    },
     fireSpots: [
       { pos: new THREE.Vector3(0, 0.4, 6), kind: 'bonfire' },
       { pos: new THREE.Vector3(3, 0.9, 3), kind: 'bonfire' }, // v3.2: burning barrel in mid
@@ -819,6 +927,8 @@ export function buildMap(scene) {
       { pos: new THREE.Vector3(21, 7, 17.5), kind: 'chimney' }, // v3.13: follows the moved chimney
       { pos: new THREE.Vector3(15, 4.5, -12), kind: 'chimney' }, // v3.2: smoke column over the foundry
       { pos: new THREE.Vector3(15, 3.6, -17.2), kind: 'chimney' }, // v3.16 Phase 3a: steam leak from the foundry pipe
+      { pos: new THREE.Vector3(17, 3.8, 15), kind: 'chimney' }, // v3.16 Phase 4d: steam vent over the boiler house (site B)
+      { pos: new THREE.Vector3(15, 0.7, -8), kind: 'chimney' }, // v3.16 Phase 4d: low steam vent at the foundry entrance (site A)
     ],
   };
 }

@@ -413,6 +413,117 @@ export function grateTextures(seed = 97, size = 256, repeat = 1) {
   return pbrSet(albedo, height, ao, rough, metal, size, repeat);
 }
 
+// --- AmbientCG photo textures (v3.16 Phase 4d) --------------------------------
+// CC0 photo PBR sets, vendored in game/assets/tex/ (1K JPG). Loaded async
+// at boot; if any file fails the game keeps the procedural textures
+// (upgradeAmbient() is only called on success). Color maps are sRGB,
+// Normal/Roughness stay linear. Repeat is set per set here (walls are big
+// boxes — one repeat is a compromise, same as the procedural sets).
+//   Metal032    — rusted metal  -> flat steel (pipes, furnace, barrels)
+//   Concrete049 — concrete      -> walls, foundry, boiler house
+//   Planks040   — pallet wood   -> crates, barricades, firewood
+// Containers keep the procedural corrugated texture (the photo metal has
+// no ribs, and the rib + tint is what makes a container read).
+export function loadAmbientTextures() {
+  const loader = new THREE.TextureLoader();
+  const load = (url, srgb) => new Promise((resolve, reject) => {
+    loader.load(url, (t) => {
+      t.wrapS = THREE.RepeatWrapping; t.wrapT = THREE.RepeatWrapping;
+      t.anisotropy = TEX_ANISO;
+      if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+      resolve(t);
+    }, undefined, reject);
+  });
+  const set = async (base, repeat) => {
+    const map = await load(`assets/tex/${base}_Color.jpg`, true);
+    const normalMap = await load(`assets/tex/${base}_NormalGL.jpg`, false);
+    const roughnessMap = await load(`assets/tex/${base}_Roughness.jpg`, false);
+    for (const t of [map, normalMap, roughnessMap]) t.repeat.set(repeat, repeat);
+    return { map, normalMap, roughnessMap };
+  };
+  return Promise.all([
+    set('Metal032_1K-JPG', 1),
+    set('Concrete049_1K-JPG', 2),
+    set('Planks040_1K-JPG', 1),
+  ]).then(([metal, concrete, wood]) => ({ metal, concrete, wood }));
+}
+
+// --- Diamond plate (v3.16 Phase 4d, procedural) --------------------------------
+// Raised diamond tread: alternating diagonal bars in the albedo + a height
+// field of diamond bumps for the normal map. No diamond plate exists on
+// AmbientCG (102 metals checked), so it is painted here in the codebase's
+// own procedural pattern. Used on the mid grate walkway strips.
+export function diamondPlateTextures(seed = 113, size = 256, repeat = 4) {
+  const albedo = cv(size), g = albedo.getContext('2d');
+  const img = g.createImageData(size, size);
+  const height = new Float32Array(size * size);
+  const ao = new Float32Array(size * size);
+  const rough = new Float32Array(size * size);
+  const metal = new Float32Array(size * size);
+  const cell = 32; // one diamond per 32 px, alternating lean per row
+  const rnd = mulberry32(seed);
+  const rustSpots = [];
+  for (let i = 0; i < 24; i++) rustSpots.push([rnd() * size, rnd() * size, 6 + rnd() * 18]);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const i = y * size + x;
+      const cx = Math.floor(x / cell), cy = Math.floor(y / cell);
+      const lx = (x % cell) / cell - 0.5, ly = (y % cell) / cell - 0.5;
+      // Diamond bump: |lx|+|ly| < 0.5 is the raised tread, leaning
+      // alternately with the row so the tread reads as a diamond plate.
+      const lean = (cy % 2 === 0) ? 1 : -1;
+      const d = Math.abs(lx + lean * ly * 0.55) + Math.abs(ly - lean * lx * 0.55);
+      const tread = Math.max(0, 1 - d * 2.4);
+      const rust = fbm(x / size * 4, y / size * 4, 4, seed, 3);
+      const rustAmt = Math.max(0, rust - 0.55) * 1.8;
+      let shade = 88 + tread * 46 - rustAmt * 30;
+      img.data[i * 4] = shade * (1 - rustAmt * 0.4) + 122 * rustAmt * 0.4;
+      img.data[i * 4 + 1] = shade * 0.92 * (1 - rustAmt * 0.4) + 74 * rustAmt * 0.4;
+      img.data[i * 4 + 2] = shade * 0.85 * (1 - rustAmt * 0.4) + 40 * rustAmt * 0.4;
+      img.data[i * 4 + 3] = 255;
+      height[i] = tread * 0.5;
+      ao[i] = 0.82 + tread * 0.1;
+      rough[i] = 0.5 - tread * 0.12 + rustAmt * 0.3;
+      metal[i] = 0.85 - rustAmt * 0.5;
+    }
+  }
+  g.putImageData(img, 0, 0);
+  // Rust freckles on the tread edges.
+  g.fillStyle = 'rgba(122,74,40,0.5)';
+  for (const [px, py, r] of rustSpots) {
+    g.beginPath(); g.arc(px, py, r * 0.4, 0, 7); g.fill();
+  }
+  return pbrSet(albedo, height, ao, rough, metal, size, repeat);
+}
+
+// --- Hazard floor line (v3.16 Phase 4d, procedural) ----------------------------
+// Yellow/black diagonal stripes for the flat line planes at the site
+// entrances. The stripe runs along the plane's long axis (repeat.x tiles).
+export function hazardLineTextures(seed = 127, size = 256) {
+  const c = cv(size), g = c.getContext('2d');
+  for (let x = -size; x < size * 2; x += 64) {
+    g.fillStyle = '#e8b62a';
+    g.beginPath();
+    g.moveTo(x, size); g.lineTo(x + 32, 0); g.lineTo(x + 64, 0); g.lineTo(x + 32, size);
+    g.closePath(); g.fill();
+  }
+  g.fillStyle = '#17181a';
+  for (let x = -size + 32; x < size * 2; x += 64) {
+    g.beginPath();
+    g.moveTo(x, size); g.lineTo(x + 32, 0); g.lineTo(x + 64, 0); g.lineTo(x + 32, size);
+    g.closePath(); g.fill();
+  }
+  // Wear: scuff the paint.
+  const rnd = mulberry32(seed);
+  g.fillStyle = 'rgba(60,60,60,0.25)';
+  for (let i = 0; i < 120; i++) g.fillRect(rnd() * size, rnd() * size, 2 + rnd() * 8, 2 + rnd() * 4);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = THREE.RepeatWrapping; t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = TEX_ANISO;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
 // --- Big wall sign (v3.16 Phase 3a): dark steel plate, huge text, orange rule.
 export function wallSignTexture(line1, line2 = '') {
   const c = document.createElement('canvas');

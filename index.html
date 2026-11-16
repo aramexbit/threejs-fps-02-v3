@@ -166,7 +166,7 @@
   .buy-foot { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--muted); margin-top: 10px; }
   .buy-hint { font-size: 12px; color: var(--muted); }
   /* Overlays */
-  .overlay { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(6,10,18,.70), rgba(6,10,18,.82)); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; pointer-events: auto; }
+  .overlay { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(6,10,18,.70), rgba(6,10,18,.82)); display: flex; flex-direction: column; align-items: center; justify-content: safe center; text-align: center; pointer-events: auto; overflow-y: auto; }
   /* v3.10: gear button + help button — v3.16 Phase 3a: di bawah kill feed
      (kanan atas), karena minimap pindah ke kiri atas. */
   .gearbtn { position: absolute; top: 196px; right: 16px; pointer-events: auto; background: var(--navy); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px 13px; font-size: 13px; font-weight: 800; cursor: pointer; letter-spacing: .04em; }
@@ -192,6 +192,26 @@
   /* Scoreboard (end of match) — v3.16 Phase 3a: big reference-style table. */
   .sb-win { color: var(--gold) !important; }
   .sb-lose { color: #ff5a4e !important; }
+  /* v3.16 Phase 4e: VICTORY/DEFEAT banner — thick hazard-striped bar
+     (CODM f-02/f-08 pattern) behind the win headline. */
+  .sb-hazard { margin: 6px auto 2px; max-width: 720px; background: var(--navy-2); border-radius: 8px; padding: 10px 18px 12px; border-top: 8px solid transparent; border-bottom: 8px solid transparent; border-image: repeating-linear-gradient(-45deg, #ffb347 0 14px, #17181a 14px 28px) 8; }
+  /* Specificity beats .overlay h1 (64px, defined later): the win headline
+     must stay on ONE line inside the 720px banner. */
+  .overlay .sb-hazard h1 { margin: 0; font-size: 28px; letter-spacing: .08em; white-space: nowrap; }
+  /* v3.16 Phase 4e: team bars with round pips (CODM f-06 pattern). */
+  .sb-teambars { display: flex; flex-direction: column; gap: 6px; max-width: 640px; margin: 10px auto 0; }
+  .sb-teambar { display: flex; align-items: center; gap: 12px; background: var(--navy-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 14px; }
+  .sb-teambar.sb-sol { border-left: 4px solid var(--red-bright); }
+  .sb-teambar.sb-bas { border-left: 4px solid var(--blue-bright); }
+  .sb-tb-name { font-weight: 900; letter-spacing: .12em; font-size: 14px; min-width: 76px; }
+  .sb-sol .sb-tb-name { color: var(--red-bright); } .sb-bas .sb-tb-name { color: var(--blue-bright); }
+  .sb-tb-pips { display: flex; gap: 7px; flex: 1; }
+  .sb-pip { width: 13px; height: 13px; border-radius: 50%; border: 2px solid rgba(255,255,255,.35); background: transparent; }
+  .sb-sol .sb-pip.pip-win { background: var(--red-bright); border-color: var(--red-bright); }
+  .sb-bas .sb-pip.pip-win { background: var(--blue-bright); border-color: var(--blue-bright); }
+  .sb-pip.pip-loss { background: rgba(255,255,255,.14); border-color: rgba(255,255,255,.25); }
+  .sb-pip.pip-todo { background: transparent; border-color: rgba(255,255,255,.14); }
+  .sb-tb-score { font-weight: 900; font-size: 20px; color: var(--gold); min-width: 24px; text-align: right; }
   .sb-kicker { font-size: 12px; font-weight: 800; letter-spacing: .18em; color: var(--muted); margin: 0 0 6px; }
   .sb-reward { font-size: 18px; font-weight: 900; color: var(--gold); margin: 8px 0 0; letter-spacing: .04em; }
   .sb-tables { display: flex; gap: 16px; margin: 14px 0 6px; max-width: 94vw; }

@@ -552,12 +552,11 @@ export class HUD {
       old.el.remove();
     }
   }
-  // v3.16 Phase 3a (reference-style): end-of-match scoreboard — big table
-  // per team (PLAYER / K / D / PTS / CASH / WEAPON) + team totals + the
-  // win line with the real last-round reason + "Your reward" (the player's
-  // real match earnings). PTS is a REAL derived stat: 2 per kill + 1 per
-  // assist (same honesty as HS% — a function of tracked stats, never
-  // invented). WEAPON is the player's/bot's real current weapon.
+  // v3.16 Phase 4e: scoreboard columns PLANTS / DEFUSES (real tracked
+  // stats — sim.js counts them at the plant/defuse call sites) beside
+  // K/D/PTS/CASH/WEAPON, plus a team bar with round pips above each table
+  // (CODM f-06 pattern: one pip per round, filled with the winner's
+  // colour, empty for unplayed rounds). The reward row stays real.
   showEnd() {
     const s = this.sim;
     const winner = s.score.solara > s.score.bastion ? 'solara' : 'bastion';
@@ -571,13 +570,26 @@ export class HUD {
     const rows = (team) => [...s.stats.values()]
       .filter((r) => r.team === team)
       .sort((a, b) => b.kills - a.kills || b.damage - a.damage)
-      .map((r) => `<tr><td class="sb-name">${r.name}</td><td>${r.kills}</td><td>${r.deaths}</td><td>${pts(r)}</td><td>$${r.earned}</td><td>${weaponOf(r.name)}</td></tr>`).join('');
+      .map((r) => `<tr><td class="sb-name">${r.name}</td><td>${r.kills}</td><td>${r.deaths}</td><td>${r.plants || 0}</td><td>${r.defuses || 0}</td><td>${pts(r)}</td><td>$${r.earned}</td><td>${weaponOf(r.name)}</td></tr>`).join('');
     const totals = (team) => {
       const rs = [...s.stats.values()].filter((r) => r.team === team);
-      const sum = (k) => rs.reduce((a, r) => a + r[k], 0);
-      return `<tr class="sb-total"><td class="sb-name">Team</td><td>${sum('kills')}</td><td>${sum('deaths')}</td><td>${rs.reduce((a, r) => a + pts(r), 0)}</td><td>$${sum('earned')}</td><td></td></tr>`;
+      const sum = (k) => rs.reduce((a, r) => a + (r[k] || 0), 0);
+      return `<tr class="sb-total"><td class="sb-name">Team</td><td>${sum('kills')}</td><td>${sum('deaths')}</td><td>${sum('plants')}</td><td>${sum('defuses')}</td><td>${rs.reduce((a, r) => a + pts(r), 0)}</td><td>$${sum('earned')}</td><td></td></tr>`;
     };
-    const table = (team, label, cls) => `<div class="sb-team ${cls}"><h3>${label} <span class="sb-score">${s.score[team]}</span></h3><table class="sb-table"><tr><th>PLAYER</th><th>K</th><th>D</th><th>PTS</th><th>CASH</th><th>WEAPON</th></tr>${rows(team) || '<tr><td colspan="6">No stats recorded</td></tr>'}${totals(team)}</table></div>`;
+    // Round pips: one pip per round of the 9-round match. Filled with the
+    // winning team's colour, hollow for rounds the team lost, dim for
+    // rounds never played (match ended early at 5 wins).
+    const pips = (team) => {
+      let out = '';
+      for (let i = 0; i < MAX_ROUNDS; i++) {
+        const w = s.roundResults[i];
+        const cls = !w ? 'pip-todo' : w === team ? 'pip-win' : 'pip-loss';
+        out += `<span class="sb-pip ${cls}"></span>`;
+      }
+      return out;
+    };
+    const teambar = (team, label, cls) => `<div class="sb-teambar ${cls}"><span class="sb-tb-name">${label}</span><span class="sb-tb-pips">${pips(team)}</span><span class="sb-tb-score">${s.score[team]}</span></div>`;
+    const table = (team, label, cls) => `<div class="sb-team ${cls}"><h3>${label} <span class="sb-score">${s.score[team]}</span></h3><table class="sb-table"><tr><th>PLAYER</th><th>K</th><th>D</th><th>PLANTS</th><th>DEFUSES</th><th>PTS</th><th>CASH</th><th>WEAPON</th></tr>${rows(team) || '<tr><td colspan="8">No stats recorded</td></tr>'}${totals(team)}</table></div>`;
     const me = s.stats.get(this.player);
     const reward = me ? me.earned : 0;
     const reason = s.lastRoundReason ? `: ${s.lastRoundReason}` : '';
@@ -587,11 +599,12 @@ export class HUD {
     // line — hide it; the scoreboard IS the match announcement now.
     this.sim.bannerT = 0;
     this.endOverlay.innerHTML = `<p class="sb-kicker">ROUND OVER · ROUND ${s.round} OF ${MAX_ROUNDS}</p>
-      <h1 class="${youWin ? 'sb-win' : 'sb-lose'}">${youWin ? '★ SOLARA WIN ★' : '★ BASTION WIN ★'}</h1>
+      <div class="sb-hazard"><h1 class="${youWin ? 'sb-win' : 'sb-lose'}">${youWin ? '★ SOLARA WIN ★' : '★ BASTION WIN ★'}</h1></div>
       <p class="sub">${youWin ? 'Solara' : 'Bastion'} win${reason} · Final score — SOLARA ${s.score.solara} · ${s.score.bastion} BASTION</p>
+      <div class="sb-teambars">${teambar('solara', 'SOLARA', 'sb-sol')}${teambar('bastion', 'BASTION', 'sb-bas')}</div>
       <p class="sb-reward">Your reward $${reward}</p>
       <div class="sb-tables">${table('solara', 'SOLARA', 'sb-sol')}${table('bastion', 'BASTION', 'sb-bas')}</div>
-      <p class="roster">PTS = 2 per kill + 1 per assist · Cash = earned this match (kill $300 · plant $300 · round bonus)</p>
+      <p class="roster">PTS = 2 per kill + 1 per assist · Cash = earned this match (kill $300 · plant $300 · round bonus) · Plants / Defuses = tracked this match</p>
       <button class="sb-again" id="sb-again">▶ MAIN LAGI</button>
       <p class="cta">Press R to play again</p>`;
     this.endOpen = true; // v3.13: keeps the pause overlay off the scoreboard

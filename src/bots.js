@@ -6,6 +6,7 @@
 // Defenders hold sites (2 A, 2 B, 1 mid/roam); attackers push as a group
 // (A 40% / mid 25% / B 35%) and plant when their site is clear.
 import * as THREE from 'three';
+import { clone as cloneSkinned } from '../vendor/utils/SkeletonUtils.js'; // v3.16 Phase 4c: per-bot skinned clones of the Soldier
 import { rayAABB, raySphere } from './player.js';
 import { TEAM_COLORS } from './palette.js';
 import { WEAPONS } from './weapons.js';
@@ -13,6 +14,36 @@ import { settings, DIFFICULTY } from './settings.js';
 
 const BOT_SPEED = 3.9;
 const BOT_HP = 100;
+
+// v3.16 Phase 4c: human soldier bot models (Soldier.glb, Mixamo via
+// three.js examples — see models.js for the credit). The template is set
+// once by main.js after the GLB loads; each bot clones it with
+// SkeletonUtils so it gets its own skeleton + mixer.
+let soldierTemplate = null;
+export function setSoldierTemplate(gltf) { soldierTemplate = gltf; }
+
+// Rifle-hold arm override (radians, applied with rotateX/rotateZ AFTER
+// mixer.update() each frame, so they are relative to the animated pose and
+// the Walk's legs/torso are untouched). Directions come from the Walk
+// clip's own data: the elbow flexes on local X (right +, left −) and the
+// shoulder swings forward on the same axis, so +X raises the right arm
+// forward and −X raises the left arm forward. The plain Walk clip swings
+// the arms free — without this override the hands never touch the rifle
+// (the 17:29 user requirement: hands + arms must visibly hold the rifle,
+// on teammates AND enemies, close-up and while moving/shooting).
+const HOLD_POSE = {
+  rArm: { x: 0.90, z: -0.45 }, rFore: { x: 0.70 },
+  lArm: { x: -1.15, z: 0.20 }, lFore: { x: -0.40 },
+};
+// (Tuned empirically over 3 rounds in probe-v316/bots4c-tune.mjs: the right
+// hand lands on the grip (dGrip ~0.14) and the left hand on the receiver
+// front / mag-well (local z -0.02). The arm's 0.47 m reach cannot extend
+// to the mid-handguard (local z -0.20), so the support hand grips at the
+// mag well — a real rifle hold, not a miss.)
+// Tuning hook (debug): the probe can replace the pose live via
+// window.__holdPose = {...} — the override reads it fresh every frame, so
+// one page load can try several poses. Shipped default is HOLD_POSE.
+if (typeof window !== 'undefined') window.__holdPose = { ...HOLD_POSE, rArm: { ...HOLD_POSE.rArm }, rFore: { ...HOLD_POSE.rFore }, lArm: { ...HOLD_POSE.lArm }, lFore: { ...HOLD_POSE.lFore } };
 
 export function hasLOS(from, to, colliders, smokes = []) {
   const d = new THREE.Vector3().subVectors(to, from);
@@ -284,6 +315,14 @@ export class Bot {
     this.quietTimer = 0; // v3.10: seconds since last enemy contact (hunt trigger)
     this.mesh = buildBotMesh(team, name); // v3.11: per-name voxel headgear
     scene.add(this.mesh);
+    // v3.16 Phase 4c: rifle base pose (position + yaw + pitch) — the
+    // procedural default; equipSoldier() replaces it with the soldier's
+    // closer pose, and _syncMesh's reload/throw poses restore to it.
+    this._rifleBase = { x: 0.12, y: 1.38, z: -0.58, ry: 0.50, rx: -0.08 };
+    this._rifleGroup = null; // the normalized SCAR-L group (from main.js)
+    this._mixer = null; // Soldier AnimationMixer (null while procedural)
+    this._bones = null; // Soldier arm bones for the hold override
+    this._soldier = false;
     this.weapon = team === 'bastion' ? 'ar77' : (rng() < 0.5 ? 'ar77' : 'vex9');
     this.damage = this.weapon === 'ar77' ? 13 : 10; // per-hit vs player
     this.accuracy = 0.55;
@@ -330,6 +369,7 @@ export class Bot {
   // clones cost almost nothing). The viewmodel hands are stripped (the bot
   // mesh has its own arms); a team-colour band keeps the team readable.
   equipRealRifle(group) {
+    this._rifleGroup = group; // kept so equipSoldier() can re-add it after the mesh swap
     const old = this.mesh.getObjectByName('proc-rifle');
     if (old) this.mesh.remove(old);
     if (this.mesh.getObjectByName('real-rifle')) return; // already equipped
@@ -354,10 +394,68 @@ export class Bot {
     sleeve.position.set(0, -0.13, 0.06);
     sleeve.name = 'team-sleeve';
     rifle.add(sleeve);
-    rifle.position.set(0.12, 1.38, -0.58); // v3.11: diagonal-forward, matches proc-rifle
-    rifle.rotation.y = 0.50;
-    rifle.rotation.x = -0.08;
+    rifle.position.set(this._rifleBase.x, this._rifleBase.y, this._rifleBase.z); // v3.11: diagonal-forward, matches proc-rifle (soldier: closer to the chest)
+    rifle.rotation.y = this._rifleBase.ry;
+    rifle.rotation.x = this._rifleBase.rx;
     this.mesh.add(rifle);
+  }
+  // v3.16 Phase 4c: swap the procedural blocky bot for the human Soldier
+  // (SkeletonUtils.clone gives this bot its own skeleton + mixer; the
+  // template's geometry/materials stay shared). The procedural mesh is the
+  // fallback until the GLB arrives, so a failed load changes nothing.
+  // Team read: the body is ONE material (VanguardBodyMat) — clone it per
+  // team and tint (Solara warm, Bastion cool), tint the visor strongly,
+  // and add a team chest band. The rifle base pose is closer to the chest
+  // than the procedural one: the Soldier's arms reach 0.47 m, and the old
+  // z -0.58 put the grip out of reach of the hold pose.
+  equipSoldier() {
+    if (!soldierTemplate || this._soldier) return;
+    const cloned = cloneSkinned(soldierTemplate.scene);
+    const teamTint = this.team === 'solara' ? 0xffb0a0 : 0xa0c0ff;
+    const visorColor = this.team === 'solara' ? 0xe0352b : 0x2b6ae0;
+    cloned.traverse((o) => {
+      if (o.isMesh) {
+        o.castShadow = true;
+        if (o.material && o.material.name === 'VanguardBodyMat') {
+          o.material = o.material.clone();
+          o.material.color.multiply(new THREE.Color(teamTint));
+        } else if (o.material && o.material.name === 'Vanguard_VisorMat') {
+          o.material = o.material.clone();
+          o.material.color.setHex(visorColor);
+        }
+      }
+    });
+    const band = new THREE.Mesh(
+      new THREE.BoxGeometry(0.30, 0.10, 0.04),
+      new THREE.MeshStandardMaterial({ color: TEAM_COLORS[this.team], roughness: 0.5, metalness: 0.3 }),
+    );
+    band.position.set(0, 1.35, -0.20); // chest front (front is -Z)
+    band.name = 'team-band';
+    cloned.add(band);
+    this._mixer = new THREE.AnimationMixer(cloned);
+    const clips = soldierTemplate.animations || [];
+    const walk = THREE.AnimationClip.findByName(clips, 'Walk');
+    const idle = THREE.AnimationClip.findByName(clips, 'Idle');
+    this._walkAction = walk ? this._mixer.clipAction(walk) : null;
+    this._idleAction = idle ? this._mixer.clipAction(idle) : null;
+    if (this._walkAction) this._walkAction.play();
+    if (this._idleAction) this._idleAction.play();
+    // NOTE: the loaded bone names have NO colon — the glTF JSON says
+    // 'mixamorig:RightArm' but the runtime objects are 'mixamorigRightArm'
+    // (verified by enumerating the loaded scene). Do not "fix" these back
+    // to the colon form: getObjectByName would return null.
+    this._bones = {
+      rArm: cloned.getObjectByName('mixamorigRightArm'),
+      rFore: cloned.getObjectByName('mixamorigRightForeArm'),
+      lArm: cloned.getObjectByName('mixamorigLeftArm'),
+      lFore: cloned.getObjectByName('mixamorigLeftForeArm'),
+    };
+    this._rifleBase = { x: 0.10, y: 1.38, z: -0.42, ry: 0.35, rx: -0.08 };
+    this.scene.remove(this.mesh);
+    this.mesh = cloned;
+    this.scene.add(this.mesh);
+    this._soldier = true;
+    if (this._rifleGroup) this.equipRealRifle(this._rifleGroup);
   }
   get eye() { return new THREE.Vector3(this.pos.x, this.pos.y + 1.55, this.pos.z); }
   spawnAt(x, z) {
@@ -1108,8 +1206,8 @@ export class Bot {
     if (this.throwT > 0 && this._rifleMesh) {
       const tp = 1 - this.throwT / 0.6;
       const swing = Math.sin(Math.min(1, Math.max(0, tp)) * Math.PI);
-      this._rifleMesh.rotation.x = -0.08 - swing * 0.9;
-      this._rifleMesh.position.y = 1.38 + swing * 0.15;
+      this._rifleMesh.rotation.x = this._rifleBase.rx - swing * 0.9;
+      this._rifleMesh.position.y = this._rifleBase.y + swing * 0.15;
       this._reloadPose = 0;
     } else {
       this._reloadPose = this._reloadPose || 0;
@@ -1117,13 +1215,32 @@ export class Bot {
       this._reloadPose += (rpTarget - this._reloadPose) * Math.min(1, dt * 6);
       if (this._reloadPose > 0.01) {
         if (this._rifleMesh) {
-          this._rifleMesh.rotation.x = -0.08 - this._reloadPose * 0.5;
-          this._rifleMesh.position.y = 1.38 - this._reloadPose * 0.10;
+          this._rifleMesh.rotation.x = this._rifleBase.rx - this._reloadPose * 0.5;
+          this._rifleMesh.position.y = this._rifleBase.y - this._reloadPose * 0.10;
         }
       } else if (this._rifleMesh) {
-        this._rifleMesh.rotation.x = -0.08;
-        this._rifleMesh.position.y = 1.38;
+        this._rifleMesh.rotation.x = this._rifleBase.rx;
+        this._rifleMesh.position.y = this._rifleBase.y;
       }
+    }
+    // v3.16 Phase 4c: Soldier animation + rifle-hold arm override. The
+    // mixer runs the Walk/Idle blend (weights from real speed); the arm
+    // override runs AFTER mixer.update() every frame, so the Walk's
+    // legs/torso are untouched and the arms hold the rifle. The mixer
+    // overwrites the bone quaternions each update, so the rotateX/Z deltas
+    // never accumulate. Idle/Walk switch is a hard weight flip (a pop is
+    // possible when a bot stops/starts — noted, not smoothed yet).
+    if (this._mixer) {
+      const moving = (this._speedSm || 0) > 0.3;
+      if (this._walkAction) this._walkAction.weight = moving ? 1 : 0;
+      if (this._idleAction) this._idleAction.weight = moving ? 0 : 1;
+      this._mixer.update(dt);
+      const b = this._bones;
+      const HP = (typeof window !== 'undefined' && window.__holdPose) || HOLD_POSE;
+      if (b.rArm) { b.rArm.rotateX(HP.rArm.x); b.rArm.rotateZ(HP.rArm.z); }
+      if (b.rFore) b.rFore.rotateX(HP.rFore.x);
+      if (b.lArm) { b.lArm.rotateX(HP.lArm.x); b.lArm.rotateZ(HP.lArm.z); }
+      if (b.lFore) b.lFore.rotateX(HP.lFore.x);
     }
   }
 }

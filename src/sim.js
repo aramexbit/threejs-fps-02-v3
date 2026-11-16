@@ -51,6 +51,7 @@ export class Sim {
     this.attackTeam = 'solara'; // team attacking THIS round
     this.plantTeam = null; // team that planted the bomb this round (null until planted)
     this.stats = new Map(); // v3.13 match stats: entity -> {name, team, kills, deaths, assists, hsKills, damage, earned}
+    this.lastRoundReason = ''; // v3.16 Phase 3a: reason of the last round (scoreboard win line)
     this.botGrenades = []; // v3.13: bot-thrown HE grenades {pos, vel, fuse, team, thrower}
   }
   // --- Match stats (v3.13, item 4) ---------------------------------------------
@@ -230,6 +231,7 @@ export class Sim {
   endRound(winner, reason) {
     if (this.phase === 'end' || this.phase === 'matchEnd') return;
     this.phase = 'end';
+    this.lastRoundReason = reason;
     this.timer = 4;
     this.score[winner]++;
     const p = this.player;

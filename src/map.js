@@ -7,8 +7,8 @@
 import * as THREE from 'three';
 import { fbm, mulberry32 } from './rng.js';
 import {
-  concreteTextures, containerTextures, hazardTextures, rockTextures,
-  sandbagTextures, snowTextures, woodTextures, siteLetterTexture, siteSignTexture,
+  concreteTextures, containerTextures, grateTextures, hazardTextures, rockTextures,
+  sandbagTextures, snowTextures, wallSignTexture, woodTextures, siteLetterTexture, siteSignTexture,
 } from './textures.js';
 
 export const MAP = { w: 44, h: 36, halfW: 22, halfH: 18 };
@@ -676,6 +676,35 @@ export function buildMap(scene) {
   sign('A', 10.5, -15.5);
   sign('B', 10.5, 15.5);
 
+  // --- v3.16 Phase 3a: reference-style industrial detail -----------------
+  // Metal grate walkway strips down the mid service road (flat planes at
+  // y 0.02, NO colliders — bots and players walk over them exactly like
+  // snow, so the waypoint graph is untouched).
+  const grate = grateTextures(97, 256, 4);
+  const grateMat = std({ ...grate, roughness: 0.55, metalness: 0.8 });
+  for (const gx of [-4, 4]) {
+    const strip = new THREE.Mesh(new THREE.PlaneGeometry(8, 2.4), grateMat);
+    strip.rotation.x = -Math.PI / 2;
+    strip.position.set(gx, 0.02, 0);
+    strip.receiveShadow = true;
+    group.add(strip);
+  }
+  // Big wall signs, flush on existing walls (no colliders, no nav impact).
+  const wallSign = (text, sub, w, h, x, y, z, ry) => {
+    const tex = wallSignTexture(text, sub);
+    const panel = new THREE.Mesh(
+      new THREE.PlaneGeometry(w, h),
+      new THREE.MeshStandardMaterial({ map: tex, roughness: 0.6, metalness: 0.4 }),
+    );
+    panel.position.set(x, y, z);
+    panel.rotation.y = ry;
+    panel.castShadow = true;
+    group.add(panel);
+  };
+  wallSign('IRONWORKS', 'RIDGE', 7, 1.75, -21.94, 2.8, 0, Math.PI / 2); // west wall, faces east
+  wallSign('FOUNDRY', 'SITE A', 5, 1.25, 15, 2.6, -17.14, 0); // foundry north wall, faces south into the site
+  wallSign('CRANE YARD', 'SITE B', 5, 1.25, 19.5, 2.4, 12.44, Math.PI); // boiler block north face, faces north
+
   scene.add(group);
 
   // --- Waypoints: lanes + site approaches -----------------------------------------
@@ -785,6 +814,7 @@ export function buildMap(scene) {
       { pos: new THREE.Vector3(8, 0.9, 7.0), kind: 'barrel' },
       { pos: new THREE.Vector3(21, 7, 17.5), kind: 'chimney' }, // v3.13: follows the moved chimney
       { pos: new THREE.Vector3(15, 4.5, -12), kind: 'chimney' }, // v3.2: smoke column over the foundry
+      { pos: new THREE.Vector3(15, 3.6, -17.2), kind: 'chimney' }, // v3.16 Phase 3a: steam leak from the foundry pipe
     ],
   };
 }

@@ -376,6 +376,65 @@ export function siteLetterTexture(letter) {
   return t;
 }
 
+// --- Metal grate walkway (v3.16 Phase 3a, reference-style) -----------------
+// Dark steel plate with a grid of bars; the holes read near-black and the
+// bar edges catch light. Used flat on the mid service road.
+export function grateTextures(seed = 97, size = 256, repeat = 1) {
+  const albedo = cv(size), g = albedo.getContext('2d');
+  g.fillStyle = '#2b3036'; g.fillRect(0, 0, size, size);
+  const cell = 32;
+  const rnd = mulberry32(seed);
+  for (let y = 0; y < size; y += cell) {
+    for (let x = 0; x < size; x += cell) {
+      g.fillStyle = '#101316';
+      g.fillRect(x + 4, y + 4, cell - 8, cell - 8);
+      g.fillStyle = 'rgba(255,255,255,0.14)';
+      g.fillRect(x, y, cell, 2); g.fillRect(x, y, 2, cell);
+      const rust = rnd();
+      if (rust > 0.6) {
+        g.fillStyle = `rgba(122,74,40,${(rust - 0.6) * 0.9})`;
+        g.fillRect(x + 2, y + 2, cell - 4, 3);
+      }
+    }
+  }
+  g.fillStyle = 'rgba(232,237,242,0.25)';
+  for (let i = 0; i < 40; i++) g.fillRect(rnd() * size, rnd() * size, 2 + rnd() * 5, 2 + rnd() * 3);
+  const height = new Float32Array(size * size);
+  const ao = new Float32Array(size * size);
+  const rough = new Float32Array(size * size);
+  const metal = new Float32Array(size * size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const i = y * size + x;
+      const hole = (x % cell > 4 && x % cell < cell - 4 && y % cell > 4 && y % cell < cell - 4);
+      height[i] = hole ? 0 : 0.4; ao[i] = hole ? 0.5 : 0.9; rough[i] = 0.55; metal[i] = hole ? 0.2 : 0.8;
+    }
+  }
+  return pbrSet(albedo, height, ao, rough, metal, size, repeat);
+}
+
+// --- Big wall sign (v3.16 Phase 3a): dark steel plate, huge text, orange rule.
+export function wallSignTexture(line1, line2 = '') {
+  const c = document.createElement('canvas');
+  c.width = 1024; c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = '#23262b'; g.fillRect(0, 0, 1024, 256);
+  g.strokeStyle = '#4a5568'; g.lineWidth = 6; g.strokeRect(6, 6, 1012, 244);
+  g.fillStyle = '#ff7a2f'; g.fillRect(40, 196, 220, 10);
+  g.fillStyle = '#eef2f6';
+  g.font = 'bold 96px system-ui, sans-serif'; g.textAlign = 'left'; g.textBaseline = 'middle';
+  g.fillText(line1, 40, line2 ? 100 : 128);
+  if (line2) {
+    g.fillStyle = '#9aa8b8';
+    g.font = 'bold 52px system-ui, sans-serif';
+    g.fillText(line2, 40, 196);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.anisotropy = TEX_ANISO;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
 // Site sign board: dark steel plate, hazard stripe top, big site letter +
 // site name ("SITE A — FOUNDRY"). Canvas 512x192, used on a double-sided
 // plane mounted on two posts at each site entrance.

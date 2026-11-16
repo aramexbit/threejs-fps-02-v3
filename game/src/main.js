@@ -14,6 +14,7 @@ import { Player } from './player.js';
 import { Bot } from './bots.js';
 import { Sim } from './sim.js';
 import { Input } from './input.js';
+import { TouchControls } from './touch.js'; // v3.15: Android touch controls
 import { HUD } from './hud.js';
 import { AudioSys } from './audio.js';
 import { ParticleSystem, MuzzleFlash, DecalPool, Fire, ChimneySmoke, Snowfall, Explosion, TracerPool } from './effects.js';
@@ -118,6 +119,11 @@ scene.add(bombMesh);
 // --- HUD -------------------------------------------------------------------------
 const hud = new HUD(map, player, sim);
 hud.audio = audio;
+// v3.15: touch controls — created after the HUD (it rewrites the start
+// screen's control list for touch). On touch devices the pointer is never
+// locked (input.touchMode gates requestLock).
+const touch = new TouchControls(input, hud);
+input.touchMode = touch.enabled;
 
 // v3.10: settings wiring — the panel owns the values (settings singleton),
 // main.js owns the lock + the live applies (same G1 pattern as the buy menu:
@@ -177,7 +183,7 @@ hud.onSettingsChange = (key) => {
   // sensitivity / fov / invertY are read live from the settings singleton.
 };
 // Debug/verification handle (read-only inspection for playtests).
-window.__game = { sim, player, bots, camera, settings, hud };
+window.__game = { sim, player, bots, camera, settings, hud, touch, input, map };
 
 // --- Post pass (vignette + grade), written from scratch ----------------------------
 // Renders the scene into a target, then a fullscreen triangle samples it.
@@ -475,6 +481,10 @@ function frame(now) {
     renderer.render(scene, camera);
   }
   hud.update(dt, bots, sim.events);
+  // v3.15 (item C): distance culling for the grass clusters (map.updateLOD,
+  // throttled to every 15 frames — the positions change slowly). THREE.LOD
+  // pines/trees update themselves in the renderer.
+  if (frames % 15 === 0 && map.updateLOD) map.updateLOD(player.pos);
   // v3.13 (item 4): the end overlay has a clickable MAIN LAGI button, so
   // the mouse must be free when the match ends. exitLock is a no-op when
   // already unlocked; endOpen (set by showEnd, just above) keeps the pause

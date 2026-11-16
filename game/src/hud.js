@@ -7,6 +7,7 @@
 import { WEAPONS } from './weapons.js';
 import { MAX_ROUNDS } from './sim.js';
 import { settings, saveSettings, DIFFICULTY, DIFFICULTY_IDS } from './settings.js';
+import { hasLOS } from './bots.js'; // v3.15: compass enemy markers (real LOS)
 
 // (v3.13: the buy-menu weapon images are gone — the shop is text-only now,
 // so there is no icon table anymore.)
@@ -22,11 +23,25 @@ export class HUD {
   constructor(map, player, sim) {
     this.map = map; this.player = player; this.sim = sim;
     this.root = el('div', 'hud', document.body);
-    // --- Minimap (top-left, round) ---
+    // --- Minimap (v3.15: top-RIGHT, tactical) ---
     const mmWrap = el('div', 'minimap-wrap', this.root);
     this.minimap = el('canvas', 'minimap', mmWrap);
     this.minimap.width = 168; this.minimap.height = 168;
     this.mm = this.minimap.getContext('2d');
+    // --- v3.15: COMPASS (top-centre) — canvas 2D, drawn every frame from
+    // the player's yaw + real site/enemy/bomb positions (never static).
+    const compassWrap = el('div', 'compass', this.root);
+    this.compass = el('canvas', '', compassWrap);
+    this.compass.width = 340; this.compass.height = 34;
+    this.cx = this.compass.getContext('2d');
+    // --- v3.15: damage-direction indicator — 4 arcs around the crosshair.
+    // The lit arc points at where the shot came from (front/right/back/
+    // left relative to where the player faces). Driven by sim 'damage'
+    // events, which carry the shooter's position (see sim.js onBotShot).
+    this.dmgDir = el('div', 'dmgdir', this.root);
+    this._dmgArcs = {};
+    for (const d of ['n', 'e', 's', 'w']) this._dmgArcs[d] = el('div', `dmg-arc dmg-${d}`, this.dmgDir);
+    this._dmgDirT = 0;
     // --- Score + round (top-centre) ---
     const score = el('div', 'score', this.root);
     this.scoreSol = el('span', 'score-sol', score);
@@ -81,9 +96,10 @@ export class HUD {
     this.cross = el('div', 'cross', this.root);
     for (let i = 0; i < 4; i++) el('i', '', this.cross);
     this.hitmarker = el('div', 'hitmarker', this.root);
-    // --- v3.11 (OhMyGames): HP / ARMOR / CASH panel, top-left di kanan
-    // minimap — tiga baris berlabel, bukan satu baris padat.
+    // --- v3.11 (OhMyGames): HP / ARMOR / CASH panel — v3.15 bottom-LEFT
+    // (tactical). Three labelled rows, not one packed line.
     const bl = el('div', 'bl', this.root);
+    this.hpPanel = bl;
     const hpRow = el('div', 'hp-row', bl);
     el('span', 'row-label hp-label', hpRow).textContent = '♥ HP';
     this.hpText = el('span', 'hptext', hpRow);
@@ -630,6 +646,8 @@ export class HUD {
       if (e.type === 'damage') {
         this.damageFx.style.opacity = '0.55';
         setTimeout(() => { this.damageFx.style.opacity = '0'; }, 180);
+        // v3.15: light the arc that points at the shooter.
+        if (e.from) this.showDamageDir(e.from.x, e.from.z);
       }
       if (e.type === 'playerDied') {
         // v3.14 (item 2): the killing blow — red wash + killer line.
@@ -766,13 +784,24 @@ export class HUD {
       this.deathFx.style.opacity = String(Math.max(0, (this._deathFxT / 1.6) * 0.9));
     }
     // Health / money / ammo / weapon slots / utility.
+    // v3.15: HP bar is white when healthy, orange when hurt, red when
+    // critical (was teal); low-HP pulses the whole panel (see .lowhp).
     this.hpFill.style.width = `${p.hp}%`;
-    this.hpFill.style.background = p.hp > 50 ? '#6fc3d8' : p.hp > 25 ? '#ffb347' : '#e05a4e';
+    this.hpFill.style.background = p.hp > 50 ? '#f4f6f8' : p.hp > 25 ? '#ff7a2f' : '#e0352b';
+    this.hpPanel.classList.toggle('lowhp', p.alive && p.hp <= 25);
     this.hpText.textContent = `${Math.ceil(p.hp)}`;
     this.armorText.textContent = `${Math.ceil(p.armor)}${p.hasKit ? ' · KIT' : ''}`;
     this.money.textContent = `$${p.money}`;
     const w = p.weapon;
     this.ammo.innerHTML = `${w.ammo} <span>| ${w.reserve}</span>`;
+    // v3.15: ammo count pops (scale) when it changes — a small, real
+    // animation tied to gameplay, not decoration.
+    if (this._lastAmmo !== w.ammo) {
+      this._lastAmmo = w.ammo;
+      this.ammo.classList.remove('bump');
+      void this.ammo.offsetWidth;
+      this.ammo.classList.add('bump');
+    }
     this.weaponName.textContent = w.reloading > 0 ? `RELOADING…` : w.def.name;
     const g = p.grenades;
     const sel = p.grenadeType;
@@ -814,6 +843,105 @@ export class HUD {
     const scoped = p.alive && p.adsHeld && p.weapon.def.zoom;
     this.scopeOverlay.classList.toggle('hidden', !scoped);
     this.cross.style.display = scoped ? 'none' : '';
+    // v3.15: damage-direction arcs fade out ~0.9 s after the hit.
+    if (this._dmgDirT > 0) {
+      this._dmgDirT -= dt;
+      if (this._dmgDirT <= 0) for (const a of Object.values(this._dmgArcs)) a.style.opacity = '0';
+    }
     this.drawMinimap(bots);
+    this.drawCompass(bots);
+  }
+
+  // v3.15: COMPASS — heading strip driven by the player's yaw (0 = north
+  // -Z, 90 = east +X). Ticks every 15°, cardinals labelled; markers for
+  // sites A/B (always), the planted bomb (pulsing), the bomb carrier, and
+  // enemies the player can actually SEE (real LOS + <40 m) — never
+  // invented positions. Bearing math: yawToFace(target) =
+  // atan2(-(tx-px), -(tz-pz)); heading = -yaw in degrees.
+  drawCompass(bots) {
+    const g = this.cx, W = 340, H = 34, cx = W / 2;
+    if (!g) return;
+    const p = this.player;
+    const wrap180 = (a) => { while (a > 180) a -= 360; while (a < -180) a += 360; return a; };
+    const heading = (((-p.yaw) * 180 / Math.PI) % 360 + 360) % 360;
+    g.clearRect(0, 0, W, H);
+    g.fillStyle = 'rgba(20,24,28,0.78)';
+    g.beginPath(); g.roundRect(0, 0, W, H, 8); g.fill();
+    g.strokeStyle = 'rgba(255,255,255,0.16)';
+    g.lineWidth = 1;
+    g.beginPath(); g.roundRect(0.5, 0.5, W - 1, H - 1, 8); g.stroke();
+    const pxPerDeg = W / 124; // show ±62°
+    // Ticks + cardinal labels.
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    for (let h = 0; h < 360; h += 15) {
+      const rel = wrap180(h - heading);
+      if (Math.abs(rel) > 62) continue;
+      const x = cx + rel * pxPerDeg;
+      const card = h % 90 === 0 ? ['N', 'E', 'S', 'W'][h / 90] : h % 45 === 0 ? ['NE', 'SE', 'SW', 'NW'][Math.floor(h / 45) % 4] : null;
+      g.strokeStyle = card ? 'rgba(244,246,248,0.9)' : 'rgba(244,246,248,0.35)';
+      g.lineWidth = card ? 2 : 1;
+      g.beginPath(); g.moveTo(x, 6); g.lineTo(x, card ? 16 : 12); g.stroke();
+      if (card) {
+        g.fillStyle = card.length === 1 ? '#ff7a2f' : 'rgba(244,246,248,0.85)';
+        g.font = 'bold 10px system-ui';
+        g.fillText(card, x, 25);
+      }
+    }
+    // Marker helper: bearing from the player to a world point.
+    const marker = (tx, tz, color, label, pulse) => {
+      const yawTo = Math.atan2(-(tx - p.pos.x), -(tz - p.pos.z));
+      const bearing = (((-yawTo) * 180 / Math.PI) % 360 + 360) % 360;
+      const rel = wrap180(bearing - heading);
+      if (Math.abs(rel) > 60) return;
+      const x = cx + rel * pxPerDeg;
+      const r = pulse ? 4 + Math.sin(this.sim.time * 5) * 1.5 : 4;
+      g.fillStyle = color;
+      g.beginPath(); g.arc(x, 10, r, 0, Math.PI * 2); g.fill();
+      if (label) {
+        g.fillStyle = '#fff';
+        g.font = 'bold 8px system-ui';
+        g.fillText(label, x, 10);
+      }
+    };
+    for (const key of ['A', 'B']) {
+      const c = this.map.sites[key].center;
+      marker(c.x, c.z, key === 'A' ? '#ff7a2f' : '#4da3ff', key, false);
+    }
+    if (this.sim.bombPlanted && this.sim.bombPos) marker(this.sim.bombPos.x, this.sim.bombPos.z, '#ff2f2f', '', true);
+    else {
+      const carrier = bots.find((b) => b.alive && b.isCarrier);
+      if (carrier) marker(carrier.pos.x, carrier.pos.z, '#ffd24a', '', false);
+    }
+    // Visible enemies only (real LOS, <40 m) — the compass never reveals
+    // a hidden enemy.
+    const eye = { x: p.pos.x, y: p.eyeY, z: p.pos.z };
+    for (const b of bots) {
+      if (!b.alive || b.team !== 'bastion') continue;
+      const d = Math.hypot(b.pos.x - p.pos.x, b.pos.z - p.pos.z);
+      if (d > 40) continue;
+      if (!hasLOS(eye, b.eye, this.map.colliders, this.sim.smokes || [])) continue;
+      marker(b.pos.x, b.pos.z, '#ff4d42', '', false);
+    }
+    // Centre caret (current heading) + degree readout.
+    g.fillStyle = '#ff7a2f';
+    g.beginPath(); g.moveTo(cx - 5, 2); g.lineTo(cx + 5, 2); g.lineTo(cx, 8); g.closePath(); g.fill();
+    g.fillStyle = 'rgba(244,246,248,0.9)';
+    g.font = 'bold 9px system-ui';
+    g.fillText(`${Math.round(heading)}°`, cx, 28);
+  }
+
+  // v3.15: light the arc pointing at the shooter. rel is the bearing of
+  // the attacker relative to where the player faces: 0 = straight ahead.
+  showDamageDir(fromX, fromZ) {
+    const p = this.player;
+    const yawTo = Math.atan2(-(fromX - p.pos.x), -(fromZ - p.pos.z));
+    let rel = yawTo - p.yaw;
+    while (rel > Math.PI) rel -= Math.PI * 2;
+    while (rel < -Math.PI) rel += Math.PI * 2;
+    const dir = Math.abs(rel) <= Math.PI / 4 ? 'n'
+      : rel > Math.PI / 4 && rel <= (3 * Math.PI) / 4 ? 'e'
+      : rel < -Math.PI / 4 && rel >= (-3 * Math.PI) / 4 ? 'w' : 's';
+    for (const [k, a] of Object.entries(this._dmgArcs)) a.style.opacity = k === dir ? '1' : '0';
+    this._dmgDirT = 0.9;
   }
 }

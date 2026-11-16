@@ -14,7 +14,7 @@ import { settings, DIFFICULTY } from './settings.js';
 const BOT_SPEED = 3.9;
 const BOT_HP = 100;
 
-function hasLOS(from, to, colliders, smokes = []) {
+export function hasLOS(from, to, colliders, smokes = []) {
   const d = new THREE.Vector3().subVectors(to, from);
   const dist = d.length();
   if (dist < 0.01) return true;
@@ -154,19 +154,25 @@ export function buildBotMesh(team, name) {
   const M = teamMats(team);
   const g = new THREE.Group();
   // --- Sturdy legs + big black boots ---
-  g.add(_box(0.26, 0.14, 0.38, M.black, -0.16, 0.07, -0.03));
-  g.add(_box(0.26, 0.14, 0.38, M.black, 0.16, 0.07, -0.03));
-  g.add(_box(0.26, 0.78, 0.28, M.suit, -0.16, 0.53, 0));
-  g.add(_box(0.26, 0.78, 0.28, M.suit, 0.16, 0.53, 0));
-  // v3.12: BLACK knee pads + straps (target image).
-  g.add(_box(0.28, 0.22, 0.06, M.black, -0.16, 0.55, -0.16)); // knee pads
-  g.add(_box(0.28, 0.22, 0.06, M.black, 0.16, 0.55, -0.16));
-  g.add(_box(0.28, 0.04, 0.30, M.black, -0.16, 0.68, 0)); // straps above pads
-  g.add(_box(0.28, 0.04, 0.30, M.black, 0.16, 0.68, 0));
-  if (team === 'solara') { // cargo side pockets
-    g.add(_box(0.04, 0.16, 0.14, M.suitDark, -0.30, 0.45, -0.02));
-    g.add(_box(0.04, 0.16, 0.14, M.suitDark, 0.30, 0.45, -0.02));
-  }
+  // v3.15: each leg's boxes live in a hip-pivot group (pivot at y 0.92,
+  // the top of the thigh) so _syncMesh can swing them ±0.5 rad while the
+  // bot walks. Before this the legs were static boxes and only the body
+  // bobbed 0.03 m — the walk read as gliding. Positions below are relative
+  // to the pivot (old absolute y minus 0.92; x relative to the hip).
+  const legL = new THREE.Group(); legL.position.set(-0.16, 0.92, 0);
+  legL.add(_box(0.26, 0.14, 0.38, M.black, 0, -0.85, -0.03)); // boot
+  legL.add(_box(0.26, 0.78, 0.28, M.suit, 0, -0.39, 0)); // thigh + shin
+  legL.add(_box(0.28, 0.22, 0.06, M.black, 0, -0.37, -0.16)); // v3.12 knee pad
+  legL.add(_box(0.28, 0.04, 0.30, M.black, 0, -0.24, 0)); // strap above pad
+  if (team === 'solara') legL.add(_box(0.04, 0.16, 0.14, M.suitDark, -0.14, -0.47, -0.02)); // cargo pocket
+  const legR = new THREE.Group(); legR.position.set(0.16, 0.92, 0);
+  legR.add(_box(0.26, 0.14, 0.38, M.black, 0, -0.85, -0.03));
+  legR.add(_box(0.26, 0.78, 0.28, M.suit, 0, -0.39, 0));
+  legR.add(_box(0.28, 0.22, 0.06, M.black, 0, -0.37, -0.16));
+  legR.add(_box(0.28, 0.04, 0.30, M.black, 0, -0.24, 0));
+  if (team === 'solara') legR.add(_box(0.04, 0.16, 0.14, M.suitDark, 0.14, -0.47, -0.02));
+  g.add(legL); g.add(legR);
+  g.userData.legL = legL; g.userData.legR = legR;
   // --- Belt + team-colour buckle + belt pouches (target image) ---
   g.add(_box(0.74, 0.10, 0.40, M.black, 0, 0.97, 0));
   g.add(_box(0.12, 0.08, 0.03, M.team, 0, 0.97, -0.21));
@@ -770,9 +776,25 @@ export class Bot {
     // of the round). Objective bots (plant/defuse/recover/guard/retreat)
     // keep walking to their objective even under fire; everyone else
     // closes distance to a far enemy (>10 m) or strafes a close one.
+    // v3.15: retreat runs to COVER, not to spawn. The old goal (team spawn)
+    // sent a hurt bot across open ground, often straight through the enemy
+    // it was fleeing. Now it picks the nearest waypoint the enemy cannot
+    // see (no LOS — a collider blocks the sight line), re-picked at most
+    // every 2 s; if no covered waypoint exists it falls back to spawn.
+    // Once the bot reaches cover the enemy loses sight of it, so `enemy`
+    // clears and the state machine resumes the normal fight from cover.
     if (this.state === 'retreat') {
-      const spawn = this.team === 'solara' ? ctx.map.spawns.solara[0] : ctx.map.spawns.bastion[0];
-      this.goal = { x: spawn.x, z: spawn.z };
+      this._retreatT = Math.max(0, (this._retreatT || 0) - dt);
+      if (!this._coverGoal || this._retreatT <= 0) {
+        this._coverGoal = this._nearestCoverWaypoint(enemy, ctx);
+        this._retreatT = 2;
+      }
+      const c = this._coverGoal;
+      if (c) this.goal = { x: c.x, z: c.z };
+      else {
+        const spawn = this.team === 'solara' ? ctx.map.spawns.solara[0] : ctx.map.spawns.bastion[0];
+        this.goal = { x: spawn.x, z: spawn.z };
+      }
     }
     this._engageGoalT = Math.max(0, (this._engageGoalT || 0) - dt);
     if (this.goal) {
@@ -876,12 +898,49 @@ export class Bot {
     const w = near.length ? near[Math.floor(this.rng() * near.length)] : wps[0];
     return { x: w.x, z: w.z };
   }
+  // v3.15: nearest waypoint the enemy CANNOT see (a collider blocks the
+  // sight line from the enemy's eye to the waypoint). Used by retreat so a
+  // hurt bot runs behind cover instead of across open ground. Returns null
+  // (caller falls back to spawn) when there is no enemy or no cover.
+  // The enemy may be the player (eyeY, no .eye getter) or a bot (.eye).
+  _nearestCoverWaypoint(enemy, ctx) {
+    if (!enemy) return null;
+    const eye = enemy.eye
+      ? enemy.eye
+      : new THREE.Vector3(enemy.pos.x, enemy.pos.y + 1.55, enemy.pos.z);
+    let best = null, bestD = Infinity;
+    for (const w of ctx.map.waypoints) {
+      const d = Math.hypot(w.x - this.pos.x, w.z - this.pos.z);
+      if (d >= bestD) continue;
+      if (hasLOS(eye, { x: w.x, y: 1.2, z: w.z }, ctx.map.colliders)) continue; // enemy CAN see it — not cover
+      best = w; bestD = d;
+    }
+    return best;
+  }
+
   _syncMesh(dt) {
     this.mesh.position.set(this.pos.x, this.pos.y, this.pos.z);
     this.mesh.rotation.y = this.yaw;
     // Walk bob from a deterministic step counter (never performance.now()).
     this.bobPhase = (this.bobPhase || 0) + (this.goal !== null ? dt * 9 : 0);
     this.mesh.position.y = this.goal !== null ? Math.abs(Math.sin(this.bobPhase)) * 0.03 : 0;
+    // v3.15: WALK CYCLE — the legs swing opposite around their hip pivots,
+    // amplitude scaled by speed (full ±0.5 rad at BOT_SPEED), easing back
+    // to 0 when the bot stops. Speed is measured from real displacement
+    // between _syncMesh calls (low-pass), so a standing bot (planting,
+    // defusing, dead) keeps its legs still. Before this the legs were
+    // static and only the body bobbed, so walking read as gliding.
+    const dtSafe = Math.max(dt, 1e-3);
+    const dx = this.pos.x - (this._lastSX ?? this.pos.x);
+    const dz = this.pos.z - (this._lastSZ ?? this.pos.z);
+    this._lastSX = this.pos.x; this._lastSZ = this.pos.z;
+    const inst = Math.hypot(dx, dz) / dtSafe;
+    this._speedSm = (this._speedSm || 0) + (Math.min(inst, BOT_SPEED * 1.3) - (this._speedSm || 0)) * Math.min(1, dt * 8);
+    const swing = this.alive ? Math.min(1, this._speedSm / BOT_SPEED) * 0.5 : 0;
+    this._walkPhase = (this._walkPhase || 0) + dt * this._speedSm * 2.2;
+    const s = Math.sin(this._walkPhase) * swing;
+    const legL = this.mesh.userData.legL, legR = this.mesh.userData.legR;
+    if (legL && legR) { legL.rotation.x = s; legR.rotation.x = -s; }
     // v3.12: RELOAD POSE — while the bot reloads (2.2 s) the rifle dips
     // down and comes back up. Smoothed so it never snaps; restores the
     // exact base pose (rotation.x -0.08, y 1.38) when done.

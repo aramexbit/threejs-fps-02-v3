@@ -37,7 +37,7 @@ setTextureAnisotropy(Math.min(4, renderer.capabilities.getMaxAnisotropy())); // 
 renderer.shadowMap.enabled = QUALITY[settings.quality].shadows;
 renderer.shadowMap.type = THREE.PCFShadowMap; // r187 removed PCFSoftShadowMap; PCF + radius 4 is the soft fallback
 renderer.toneMapping = THREE.AgXToneMapping;
-renderer.toneMappingExposure = 1.38; // v3.14: was 1.3 — one step brighter than TERANG SEIMBANG; 1.45 blew the snow out to flat white in v3.1, 1.38 stays short of that
+renderer.toneMappingExposure = 1.42; // v3.16 Phase 5c: was 1.38 — one more step toward the light; 1.45 blew the snow out to flat white in v3.1, 1.42 stays short of that
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
@@ -225,9 +225,9 @@ void main(){
   c.r = texture2D(tDiffuse, vUv + d * ca).r;
   c.g = texture2D(tDiffuse, vUv).g;
   c.b = texture2D(tDiffuse, vUv - d * ca).b;
-  // S-curve contrast (v3.14: was 1.06 — a flatter curve keeps shadow
-  // detail out of silhouette in the brighter grade).
-  c = clamp((c - 0.5) * 1.04 + 0.5, 0.0, 1.0);
+  // S-curve contrast (v3.16 Phase 5c: was 1.04 — a flatter curve keeps
+  // shadow detail out of silhouette in the brighter grade).
+  c = clamp((c - 0.5) * 1.02 + 0.5, 0.0, 1.0);
   // v3.6 day: near-neutral grade — the teal-orange split tone was tuned
   // for the sunset; in daylight it only tints the snow. A whisper of cool
   // shadows / warm highlights remains.
@@ -238,9 +238,10 @@ void main(){
   // A touch of saturation (v3.14: was 1.06 — vivid team colours need a
   // little more in the brighter grade; 1.09 keeps red/blue from washing out).
   c = mix(vec3(l), c, 1.09);
-  // Vignette (v3.14: was 0.25 — the dark corners swallowed the viewmodel
-  // rifle and the HUD edges; 0.18 keeps the frame without the gloom).
-  float vig = 1.0 - r2 * 0.18;
+  // Vignette (v3.16 Phase 5c: was 0.18 — the dark corners swallowed the
+  // viewmodel rifle and the HUD edges; 0.10 keeps the frame without the
+  // gloom).
+  float vig = 1.0 - r2 * 0.10;
   c *= vig;
   // Animated film grain (subtle: +/-1.8%).
   float g = hash(vUv * vec2(1920.0, 1080.0) + fract(uTime * 0.61) * 43.0) - 0.5;
